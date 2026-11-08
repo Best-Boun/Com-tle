@@ -1,0 +1,106 @@
+
+const USER_ROLES = Object.freeze({
+    CUSTOMER: "CUSTOMER",
+    TECHNICIAN: "TECHNICIAN",
+    ADMIN: "ADMIN"
+});
+
+const PERMISSIONS = Object.freeze({
+    USER_PROFILE_VIEW_OWN: "user.profile.view_own",
+    USER_PROFILE_UPDATE_OWN: "user.profile.update_own",
+    BOOKING_CREATE: "booking.create",
+    BOOKING_VIEW_OWN: "booking.view_own",
+    BOOKING_MANAGE: "booking.manage",
+    CATALOG_VIEW: "catalog.view",
+    CATALOG_MANAGE: "catalog.manage",
+    WORK_ORDER_RECEIVE_CREATE: "work_order.receive_create",
+    WORK_ORDER_VIEW_ASSIGNED: "work_order.view_assigned",
+    WORK_ORDER_ASSIGN_TECHNICIAN: "work_order.assign_technician",
+    DIAGNOSIS_RECORD: "diagnosis.record",
+    REPAIR_ITEM_PROPOSE: "repair.item.propose",
+    QUOTATION_SET_PRICE: "quotation.set_price",
+    QUOTATION_VIEW_OWN: "quotation.view_own",
+    QUOTATION_APPROVE_OWN: "quotation.approve_own",
+    QUOTATION_REJECT_OWN: "quotation.reject_own",
+    QUOTATION_APPROVE_WALK_IN: "quotation.approve_walk_in",
+    REPAIR_START: "repair.start",
+    REPAIR_RESULT_RECORD: "repair.result.record",
+    REPAIR_HISTORY_VIEW_OWN: "repair.history.view_own",
+    REPAIR_HISTORY_VIEW_ASSIGNED: "repair.history.view_assigned",
+    REPAIR_HISTORY_VIEW_ALL: "repair.history.view_all",
+    TEST_RESULT_RECORD: "test_result.record",
+    INVENTORY_PART_PROPOSE: "inventory.part.propose",
+    INVENTORY_ISSUE: "inventory.issue",
+    PAYMENT_VIEW_OWN: "payment.view_own",
+    PAYMENT_RECORD: "payment.record",
+    HANDOVER_COMPLETE: "handover.complete"
+});
+
+const ROLE_PERMISSIONS = Object.freeze({
+    [USER_ROLES.CUSTOMER]: Object.freeze([
+        PERMISSIONS.USER_PROFILE_VIEW_OWN,
+        PERMISSIONS.USER_PROFILE_UPDATE_OWN,
+        PERMISSIONS.BOOKING_CREATE,
+        PERMISSIONS.BOOKING_VIEW_OWN,
+        PERMISSIONS.CATALOG_VIEW,
+        PERMISSIONS.QUOTATION_VIEW_OWN,
+        PERMISSIONS.QUOTATION_APPROVE_OWN,
+        PERMISSIONS.QUOTATION_REJECT_OWN,
+        PERMISSIONS.REPAIR_HISTORY_VIEW_OWN,
+        PERMISSIONS.PAYMENT_VIEW_OWN
+    ]),
+    [USER_ROLES.TECHNICIAN]: Object.freeze([
+        PERMISSIONS.WORK_ORDER_VIEW_ASSIGNED,
+        PERMISSIONS.DIAGNOSIS_RECORD,
+        PERMISSIONS.REPAIR_ITEM_PROPOSE,
+        PERMISSIONS.REPAIR_START,
+        PERMISSIONS.REPAIR_RESULT_RECORD,
+        PERMISSIONS.REPAIR_HISTORY_VIEW_ASSIGNED,
+        PERMISSIONS.TEST_RESULT_RECORD,
+        PERMISSIONS.INVENTORY_PART_PROPOSE
+    ]),
+    [USER_ROLES.ADMIN]: Object.freeze([
+        PERMISSIONS.BOOKING_MANAGE,
+        PERMISSIONS.CATALOG_VIEW,
+        PERMISSIONS.CATALOG_MANAGE,
+        PERMISSIONS.WORK_ORDER_RECEIVE_CREATE,
+        PERMISSIONS.WORK_ORDER_ASSIGN_TECHNICIAN,
+        PERMISSIONS.QUOTATION_SET_PRICE,
+        PERMISSIONS.QUOTATION_APPROVE_WALK_IN,
+        PERMISSIONS.REPAIR_HISTORY_VIEW_ALL,
+        PERMISSIONS.INVENTORY_ISSUE,
+        PERMISSIONS.PAYMENT_RECORD,
+        PERMISSIONS.HANDOVER_COMPLETE
+    ])
+});
+
+const HTTP_STATUS = Object.freeze({
+    OK: 200,
+    CREATED: 201,
+    BAD_REQUEST: 400,
+    UNAUTHORIZED: 401,
+    FORBIDDEN: 403,
+    NOT_FOUND: 404,
+    CONFLICT: 409,
+    INTERNAL_SERVER_ERROR: 500,
+    SERVICE_UNAVAILABLE: 503
+});
+
+const WORK_ORDER_STATUS = Object.freeze({
+    PENDING: "PENDING",
+    DIAGNOSING: "DIAGNOSING",
+    WAITING_APPROVAL: "WAITING_APPROVAL",
+    APPROVED: "APPROVED",
+    REPAIRING: "REPAIRING",
+    TESTING: "TESTING",
+    COMPLETED: "COMPLETED",
+    CANCELLED: "CANCELLED"
+});
+
+module.exports = {
+    USER_ROLES,
+    PERMISSIONS,
+    ROLE_PERMISSIONS,
+    HTTP_STATUS,
+    WORK_ORDER_STATUS
+};

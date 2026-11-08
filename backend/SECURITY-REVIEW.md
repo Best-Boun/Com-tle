@@ -1,80 +1,80 @@
-# JWT Authentication Security Review
+# JWT Authentication and Authorization Security Review
 
-## 1. Overall Readiness
+## Historical Security Review — Findings at the Time of Original Review
 
-**FAIL — Not ready to claim end-to-end JWT authentication.** The API Gateway has an RS256 verification middleware and compatible RSA keys, but none of the six proxy routes applies authentication. No User Service token-issuance flow was found in the reviewed files. Whether downstream services enforce authorization independently was not established.
+The following findings describe the implementation and evidence available during the original review. They are retained for audit history and are not statements of the current code state.
 
-## 2. RSA Key Pair Review
+### Historical implementation status
 
-- **PASS:** All three key files exist and parse as RSA 2048-bit PEM keys. The User Service public key and API Gateway public key match the public key derived from the User Service private key.
-- **PASS:** API Gateway verification uses its public key in `api-gateway/src/middleware/authMiddleware.js`.
-- **WARNING:** `user-service/keys/private.pem` is stored as a cleartext file in the project tree. Whether it has been shared or deployed is unknown. Treat it as exposed if it has.
-- **NOT IMPLEMENTED:** User Service was not found loading or using the private key to sign tokens; key-file presence alone does not establish signing.
+- The Gateway had RS256 verification middleware, but the reviewed service proxy routes did not apply it.
+- No User Service token-issuance flow was found in the files reviewed at that time.
+- The then-reviewed Gateway verifier did not require `exp`, validate `iss`/`aud`, or validate claim shape before assigning request context.
+- The then-reviewed role middleware was not wired to proxy routes, and shared role definitions did not match the currently approved three-role model.
+- The then-reviewed Gateway used default CORS behavior rather than an exact-origin allowlist.
+- Proxy failure handling and downstream authorization had not been established.
 
-No key contents are included in this report.
+### Historical key-management concern
 
-## 3. JWT Authentication Review
+- A JWT signing private key was present as a cleartext file in the project tree and had also appeared in Git history.
+- The corresponding public key could verify tokens signed by that private key. Anyone obtaining the private key could potentially mint tokens accepted by a verifier trusting the corresponding public key.
+- Whether the historical key was pushed, shared, or trusted by a deployment was not verified. Treat the historical key as potentially exposed; deleting a working-tree file does not erase Git history or revoke a key.
 
-- **PASS:** `api-gateway/src/middleware/authMiddleware.js` extracts a Bearer token from the Authorization header (lines 15–24) and verifies it with `jwt.verify`, restricted to RS256 (lines 27–28). Invalid signatures and expired `exp` values are subject to verification failure.
-- **WARNING:** Expiration is checked only when `exp` is present; a validly signed token without `exp` can be accepted. A maximum token age is not configured.
-- **WARNING:** The decoded payload is assigned wholesale to `req.user` (line 31), without validating required claim presence or types.
-- **NOT IMPLEMENTED:** Issuer and audience constraints are not configured.
+### Historical readiness conclusion
 
-## 4. Authorization Review
+At the time, the implementation was not ready to claim end-to-end JWT authentication or protected business authorization. Those findings motivated the subsequent authentication, routing, and authorization work. They must not be interpreted as a complete record of current verification.
 
-- **PASS:** `api-gateway/src/middleware/roleMiddleware.js` checks that `req.user` exists and compares its role against the supplied allowed-role list (lines 5–18).
-- **WARNING:** `shared/constants/index.js` defines `CUSTOMER`, `STAFF`, `TECHNICIAN`, and `ADMIN`, but the reviewed route setup does not use these constants or apply the role middleware.
-- **NOT IMPLEMENTED:** No role-based access rules are wired to the six gateway proxies.
+## Current Security Verification — 2026-11-08
 
-## 5. API Gateway Routing Review
+The following describes the current repository implementation verified on 2026-11-08. It is not a production-readiness certification.
 
-All six proxy routes in `api-gateway/src/routes/serviceRoutes.js` are currently public/unprotected; `api-gateway/server.js` mounts the router without applying authentication (lines 19–21).
+### JWT issuance and validation
 
-| Route | Target environment variable |
-|---|---|
-| `/api/users` | `USER_SERVICE_URL` |
-| `/api/bookings` | `BOOKING_SERVICE_URL` |
-| `/api/catalog` | `CATALOG_SERVICE_URL` |
-| `/api/repairs` | `REPAIR_SERVICE_URL` |
-| `/api/inventory` | `INVENTORY_SERVICE_URL` |
-| `/api/payments` | `PAYMENT_SERVICE_URL` |
+- **Verified:** User Service login issues access tokens using RS256, with `sub`, roles, issuer, audience, issued-at time, and configured expiration. The configured lifetime is represented in seconds.
+- **Verified:** Gateway JWT middleware restricts accepted algorithms to RS256 and verifies the signature, expiration, issuer, and audience before accepting the token.
+- **Verified:** The middleware validates the subject and roles claim shape and allows only the configured role codes before creating the normalized authenticated context.
 
-No target fallback is defined in the route code.
+Relevant implementation: `user-service/src/services/authService.js`, `user-service/src/config/jwt.js`, and `api-gateway/src/middleware/authMiddleware.js`.
 
-- **WARNING:** Proxy configuration sets a target and `changeOrigin`, but no explicit proxy error callback is configured (`api-gateway/src/routes/serviceRoutes.js`, lines 4–9).
-- **PASS:** Gateway not-found/error handlers are mounted after routes (`api-gateway/server.js`, lines 32–33); `api-gateway/src/middleware/errorMiddleware.js` returns a generic 500 response.
+### Gateway routing and browser controls
 
-## 6. User Service Integration Review
+- **Verified:** The public Gateway allowlist contains only `POST /api/users/auth/register` and `POST /api/users/auth/login`.
+- **Verified:** Other User Service routes and the Booking, Catalog, Repair, Inventory, and Payment service prefixes remain denied. Protected Business Routes are not enabled.
+- **Verified:** CORS uses exact-origin allowlisting, rejects unlisted origins, does not allow credentials, and fails closed when no origins are configured.
+- **Verified:** Login rate limiting is implemented.
 
-- **NOT IMPLEMENTED:** `user-service/server.js` contains middleware setup and a health endpoint, but no Login/Register/token-issuance implementation or private-key signing use was found. The reviewed code therefore does not demonstrate issuing valid RS256 JWTs.
-- **PASS:** The private key and corresponding public key files exist and match. Database configuration remains present in `user-service/src/config/database.js`.
+Relevant implementation: `api-gateway/src/routes/serviceRoutes.js`, `api-gateway/src/middleware/corsMiddleware.js`, `api-gateway/src/middleware/loginRateLimit.js`, and `api-gateway/src/app.js`.
 
-## 7. Security Issues
+### Authentication and authorization foundation
 
-| # | Severity | File | Lines | Vulnerability | Confidence |
-|---|----------|------|-------|---------------|------------|
-| 1 | 🟠 HIGH | `user-service/keys/private.pem` | — | Cleartext signing private key is stored in the project tree; if obtained, it can mint tokens accepted by the matching gateway public key. Sharing/deployment status is unknown. | 8/10 |
-| 2 | 🟡 MEDIUM | `api-gateway/src/routes/serviceRoutes.js` | 14–47 | All six service proxies lack authentication/role checks, so the gateway forwards unauthenticated requests. Downstream authorization was not assessed. | 9/10 |
-| 3 | 🟡 MEDIUM | `api-gateway/src/middleware/authMiddleware.js` | 27–31 | Tokens are not required to contain `exp`, `iss` and `aud` are not validated, and decoded claims are trusted wholesale as `req.user`. | 8/10 |
-| 4 | ⚪ LOW | `api-gateway/server.js` | 16 | Default `cors()` allows any origin. No credentialed CORS setting was observed; this alone does not establish an authorization bypass. | 8/10 |
+- **Verified:** JWT Authentication Middleware exists and establishes the authenticated request context from verified claims.
+- **Verified:** Role Middleware exists and denies missing or invalid role context.
+- **Verified:** Permission Middleware and server-side Role-Permission Mapping are implemented. The roles are `CUSTOMER`, `TECHNICIAN`, and `ADMIN`; there is no `STAFF` role.
+- **Verified:** Pending permissions remain ungranted, including Refund and Payment Void permissions, `inventory.manage`, and Technician/Admin profile permissions.
+- **Limitation:** The Authentication, Role, and Permission middleware are not wired to Protected Business Routes because those routes are not enabled.
 
-API Gateway `.env` and `.env.example` values were not included. The inspected configuration names were `NODE_ENV`, `PORT`, `USER_SERVICE_URL`, `BOOKING_SERVICE_URL`, `CATALOG_SERVICE_URL`, `REPAIR_SERVICE_URL`, `INVENTORY_SERVICE_URL`, and `PAYMENT_SERVICE_URL`.
+Relevant implementation: `shared/constants/index.js`, `api-gateway/src/middleware/authMiddleware.js`, `api-gateway/src/middleware/roleMiddleware.js`, and `api-gateway/src/middleware/permissionMiddleware.js`.
 
-## 8. Missing Implementations
+### Test results
 
-- User Service token issuance/signing using the private key.
-- Authentication on protected gateway proxy routes, with explicit identification of any intentionally public endpoints.
-- Route-specific authorization using the shared role constants.
-- Required expiry and appropriate issuer/audience checks; validation of expected JWT claim types and shape.
-- Secure signing-key storage and a key rotation plan.
-- Explicit proxy failure handling and restrictive CORS origins, as appropriate for deployment.
+- **Verified:** API Gateway tests: **39/39 passed**.
+- **Verified:** User Service tests: **22/22 passed**.
 
-## 9. Recommended Implementation Order
+These are repository test results, not evidence that every production deployment uses the inspected configuration.
 
-1. Protect and, if shared or deployed, rotate the private key; keep signing material in a managed secret store.
-2. Implement User Service token issuance with the private key and a defined claim/expiry policy.
-3. Apply authentication and route-specific authorization at the gateway; confirm downstream services enforce authorization where needed.
-4. Require and validate `exp`, configure appropriate `iss`/`aud`, and validate claims before assigning `req.user`.
-5. Restrict CORS and define explicit proxy error behavior; add tests for missing, invalid, expired, and unauthorized requests.
+## Remaining Risks and Limitations
 
-**Summary:** RS256 verification and key compatibility are present, but JWT integration requires corrections before it is ready: there is no demonstrated token issuer and no gateway proxy route enforces authentication.
+- **Resource-level authorization is not implemented.** Ownership, technician assignment, and business-resource scope checks must be implemented in the services that own those resources before protected APIs are exposed.
+- **Protected Business APIs are not available.** The current Gateway deny-by-default behavior is intentional; the authorization middleware is foundation code and is not yet attached to business routes.
+- **Five Business Services remain skeletons:** Booking, Catalog, Repair, Inventory, and Payment currently expose infrastructure/health behavior rather than implemented business APIs.
+- **Login rate limiting is process-local.** It does not provide a shared limit across multiple Gateway instances and may need a distributed store and deployment-aware IP handling.
+- **Production deployment settings have not been verified.** Local configuration and tests do not establish production runtime settings.
+- **Deployment key trust and key rotation have not been verified.** It remains unknown whether any deployed environment ever trusted the historical public key or whether it has been fully retired everywhere.
+- **Database grants and least-privilege configuration have not been verified.**
+- **Production logging destinations, access controls, and retention have not been verified.**
+- **Historical private-key exposure remains a concern.** The former private key must be treated as potentially compromised unless deployment and repository exposure investigations establish otherwise. The current repository's ignore rules do not remove copies from Git history, clones, backups, or checkpoints.
+
+## Readiness Conclusion
+
+**Not production-ready for Protected Business APIs.** JWT issuance and Gateway verification, restrictive Gateway routing, CORS allowlisting, rate limiting, and the Permission-based Authorization Foundation are implemented and covered by the reported tests. Resource-level authorization, Business Service APIs, deployment verification, key-trust/rotation verification, database privilege verification, and production logging review remain outstanding.
+
+No claim is made here that the historical key was or was not deployed, that production environments match local configuration, or that business authorization is enforced end to end.
