@@ -1,44 +1,39 @@
-
-const express = require("express");
-const helmet = require("helmet");
+require("dotenv").config({ path: require("node:path").resolve(__dirname, ".env") });
+const jwt = require("jsonwebtoken");
 const db = require("./src/config/database");
+const { createApp } = require("./src/app");
+const { loadBookingConfig } = require("./src/config/bookingConfig");
+const { createBookingRepository } = require("./src/repositories/bookingRepository");
+const { createBookingService } = require("./src/services/bookingService");
 const {
-    notFoundHandler,
-    errorHandler
-} = require("../shared/middleware/errorMiddleware");
-require("dotenv").config();
+    createCatalogClient,
+    createRepairClient
+} = require("./src/clients/serviceClients");
+const {
+    loadServiceJwtConfig,
+    createAuthenticate
+} = require("../shared/middleware/serviceAuth");
 
-const app = express();
 const PORT = process.env.PORT || 3002;
+const config = loadBookingConfig(process.env);
+const jwtConfig = loadServiceJwtConfig(process.env, { baseDir: __dirname });
 
-app.use(helmet());
-app.use(express.json());
-
-app.get("/health", async (req, res) => {
-    try {
-        await db.raw("SELECT 1");
-
-        res.status(200).json({
-            success: true,
-            service: "booking-service",
-            status: "running",
-            database: "connected"
-        });
-
-    } catch (error) {
-        console.error("Database health check failed:", error.message);
-
-        res.status(503).json({
-            success: false,
-            service: "booking-service",
-            status: "running",
-            database: "disconnected"
-        });
-    }
+const app = createApp({
+    bookingService: createBookingService({
+        bookingRepository: createBookingRepository(db),
+        catalogClient: createCatalogClient({
+            baseUrl: config.catalogServiceUrl,
+            timeoutMs: config.serviceCallTimeoutMs
+        }),
+        repairClient: createRepairClient({
+            baseUrl: config.repairServiceUrl,
+            timeoutMs: config.serviceCallTimeoutMs
+        }),
+        config
+    }),
+    authenticate: createAuthenticate({ jwt, ...jwtConfig }),
+    healthCheck: () => db.raw("SELECT 1")
 });
-
-app.use(notFoundHandler);
-app.use(errorHandler);
 
 const server = app.listen(PORT, () => {
     console.log(`Booking Service running on port ${PORT}`);

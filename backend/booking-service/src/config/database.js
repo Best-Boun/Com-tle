@@ -31,12 +31,18 @@ const db = knex({
         port: Number(process.env.DB_PORT),
         user: process.env.DB_USER,
         password: process.env.DB_PASSWORD,
-        database: process.env.DB_NAME
+        database: process.env.DB_NAME,
+        // Store and read DATETIME values as UTC
+        timezone: "Z"
     },
 
     pool: {
         min: Number(process.env.DB_POOL_MIN || 0),
-        max: Number(process.env.DB_POOL_MAX || 5)
+        max: Number(process.env.DB_POOL_MAX || 5),
+        // Make CURRENT_TIMESTAMP defaults UTC as well
+        afterCreate(connection, done) {
+            connection.query("SET time_zone = '+00:00'", (error) => done(error, connection));
+        }
     },
 
     acquireConnectionTimeout: 10000
