@@ -1,0 +1,61 @@
+/*
+ * SmartFix design tokens
+ * Idea: the paper repair ticket tied to a device at the counter.
+ * Quiet cool-grey workshop surfaces, solder-mask green as the brand,
+ * tape amber for "waiting on someone" states.
+ */
+:root {
+    /* Base palette */
+    --ink: #17212b;
+    --ink-soft: #4a5663;
+    --ink-faint: #7a8691;
+    --paper: #eef1ef;
+    --surface: #ffffff;
+    --line: #cbd3cf;
+    --line-soft: #e0e5e2;
+
+    --green: #16624a;
+    --green-deep: #0f4a37;
+    --green-tint: #dcebe4;
+    --amber: #f0a202;
+    --amber-tint: #fdf0cf;
+    --amber-ink: #7a5200;
+    --red: #b42318;
+    --red-tint: #fbe4e1;
+    --blue: #1f5fa8;
+    --blue-tint: #dfeaf7;
+    --grey-tint: #e7eaec;
+
+    /* Type: one family, Thai + Latin */
+    --font: "IBM Plex Sans Thai", "Noto Sans Thai", "Leelawadee UI", system-ui, sans-serif;
+
+    /* Scale (1.250 major third, 16px base) */
+    --fs-xs: 0.8rem;
+    --fs-sm: 0.875rem;
+    --fs-md: 1rem;
+    --fs-lg: 1.25rem;
+    --fs-xl: 1.563rem;
+    --fs-2xl: 1.953rem;
+    --fs-3xl: 2.441rem;
+    --fs-4xl: 3.052rem;
+
+    /* Space (4px grid) */
+    --s1: 4px;
+    --s2: 8px;
+    --s3: 12px;
+    --s4: 16px;
+    --s5: 24px;
+    --s6: 32px;
+    --s7: 48px;
+    --s8: 64px;
+
+    /* Radii carry meaning: controls are slightly rounded, tickets are cut paper */
+    --r-control: 6px;
+    --r-panel: 10px;
+
+    --shadow-ticket: 0 1px 0 rgba(23, 33, 43, 0.06), 0 8px 24px -12px rgba(23, 33, 43, 0.28);
+    --focus: 0 0 0 3px rgba(22, 98, 74, 0.35);
+
+    --content: 1120px;
+    --sidebar: 248px;
+}

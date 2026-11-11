@@ -1,0 +1,275 @@
+/*
+ * The repair ticket — SmartFix's signature element.
+ * A cut-paper tag: punched hole on the left, perforation before the stub,
+ * ticket number in large tabular figures, status as a rubber stamp.
+ */
+.ticket {
+    --notch: 10px;
+    position: relative;
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr) auto;
+    background: var(--surface);
+    border-radius: 4px 14px 14px 4px;
+    box-shadow: var(--shadow-ticket);
+    color: var(--ink);
+    text-decoration: none;
+    overflow: hidden;
+}
+
+a.ticket:hover {
+    color: var(--ink);
+    box-shadow: 0 1px 0 rgba(23, 33, 43, 0.06), 0 12px 28px -12px rgba(23, 33, 43, 0.38);
+}
+
+/* Left strip with the punched hole and string */
+.ticket-tag {
+    position: relative;
+    background: var(--green);
+    border-right: 2px dashed rgba(255, 255, 255, 0.35);
+}
+
+.ticket-tag::before {
+    content: "";
+    position: absolute;
+    top: 18px;
+    left: 50%;
+    width: 14px;
+    height: 14px;
+    margin-left: -7px;
+    border-radius: 50%;
+    background: var(--paper);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.ticket.walkin .ticket-tag {
+    background: var(--ink-soft);
+}
+
+.ticket-body {
+    display: grid;
+    gap: var(--s1);
+    padding: var(--s4) var(--s5);
+    min-width: 0;
+}
+
+.ticket-number {
+    font-size: var(--fs-lg);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+}
+
+.ticket-title {
+    font-weight: 500;
+}
+
+.ticket-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s1) var(--s4);
+    font-size: var(--fs-sm);
+    color: var(--ink-soft);
+}
+
+/* Stub on the right, separated by a perforation with notches */
+.ticket-stub {
+    position: relative;
+    display: grid;
+    align-content: center;
+    justify-items: end;
+    gap: var(--s2);
+    padding: var(--s4) var(--s5);
+    border-left: 2px dashed var(--line);
+    min-width: 150px;
+}
+
+.ticket-stub::before,
+.ticket-stub::after {
+    content: "";
+    position: absolute;
+    left: calc(var(--notch) * -1 - 1px);
+    width: calc(var(--notch) * 2);
+    height: calc(var(--notch) * 2);
+    border-radius: 50%;
+    background: var(--paper);
+}
+
+.ticket-stub::before {
+    top: calc(var(--notch) * -1);
+}
+
+.ticket-stub::after {
+    bottom: calc(var(--notch) * -1);
+}
+
+/* Rubber-stamp status */
+.stamp {
+    display: inline-block;
+    padding: 2px 10px;
+    border: 2px solid currentColor;
+    border-radius: 4px;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    transform: rotate(-4deg);
+    white-space: nowrap;
+}
+
+.stamp.tone-grey { color: var(--ink-faint); }
+.stamp.tone-amber { color: #b67800; }
+.stamp.tone-blue { color: var(--blue); }
+.stamp.tone-green { color: var(--green); }
+.stamp.tone-red { color: var(--red); }
+
+.ticket-list {
+    display: grid;
+    gap: var(--s4);
+}
+
+@media (max-width: 640px) {
+    .ticket {
+        grid-template-columns: 36px minmax(0, 1fr);
+    }
+
+    .ticket-stub {
+        grid-column: 2;
+        justify-items: start;
+        border-left: 0;
+        border-top: 2px dashed var(--line);
+        padding-top: var(--s3);
+        min-width: 0;
+    }
+
+    .ticket-stub::before,
+    .ticket-stub::after {
+        display: none;
+    }
+
+    .ticket-tag::before {
+        width: 10px;
+        height: 10px;
+        margin-left: -5px;
+    }
+}
+
+/* ---------- Home hero: a large live ticket ---------- */
+.hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    gap: var(--s7);
+    align-items: center;
+    padding: var(--s6) 0 var(--s7);
+}
+
+.hero h1 {
+    font-size: var(--fs-4xl);
+    line-height: 1.15;
+    letter-spacing: -0.025em;
+    max-width: 14ch;
+}
+
+.hero-lede {
+    margin-top: var(--s4);
+    font-size: var(--fs-lg);
+    color: var(--ink-soft);
+    max-width: 36ch;
+}
+
+.hero .btn-row {
+    margin-top: var(--s5);
+}
+
+.hero-ticket {
+    position: relative;
+    transform: rotate(1.5deg);
+}
+
+/* the string the tag hangs from */
+.hero-ticket::before {
+    content: "";
+    position: absolute;
+    left: -64px;
+    top: 24px;
+    width: 92px;
+    height: 2px;
+    background: #9b8c6e;
+    transform: rotate(-12deg);
+    transform-origin: right center;
+}
+
+.hero-ticket .ticket {
+    grid-template-columns: 72px minmax(0, 1fr);
+}
+
+.hero-ticket .ticket-tag::before {
+    top: 22px;
+    width: 18px;
+    height: 18px;
+    margin-left: -9px;
+}
+
+.hero-ticket .ticket-body {
+    padding: var(--s5) var(--s6);
+    gap: var(--s3);
+}
+
+.hero-ticket .ticket-number {
+    font-size: var(--fs-3xl);
+    line-height: 1.1;
+}
+
+.hero-steps {
+    margin-top: var(--s3);
+}
+
+.hero-stamp {
+    position: absolute;
+    right: var(--s5);
+    top: var(--s5);
+    font-size: var(--fs-sm);
+    animation: stamp-in 380ms cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+@keyframes stamp-in {
+    from { opacity: 0; transform: rotate(-4deg) scale(1.6); }
+    to { opacity: 1; transform: rotate(-4deg) scale(1); }
+}
+
+@media (max-width: 900px) {
+    .hero {
+        grid-template-columns: 1fr;
+        gap: var(--s6);
+        padding-top: var(--s4);
+    }
+
+    .hero h1 {
+        font-size: var(--fs-3xl);
+    }
+
+    .hero-ticket {
+        transform: none;
+    }
+
+    .hero-ticket::before {
+        display: none;
+    }
+}
+
+@media (max-width: 640px) {
+    .hero-ticket .ticket {
+        grid-template-columns: 40px minmax(0, 1fr);
+    }
+
+    .hero-ticket .ticket-body {
+        padding: var(--s4);
+    }
+
+    .hero-ticket .ticket-number {
+        font-size: var(--fs-2xl);
+    }
+
+    .hero-stamp {
+        position: static;
+        justify-self: start;
+    }
+}

@@ -1,0 +1,229 @@
+/* ---------- Booking flow ---------- */
+.booking-flow {
+    display: grid;
+    gap: var(--s5);
+}
+
+.flow-steps {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2) var(--s5);
+    font-size: var(--fs-sm);
+    color: var(--ink-faint);
+}
+
+.flow-steps li {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+}
+
+.flow-num {
+    display: inline-grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 2px solid var(--line);
+    font-weight: 600;
+    font-size: var(--fs-xs);
+}
+
+.flow-steps li.done {
+    color: var(--ink-soft);
+}
+
+.flow-steps li.done .flow-num {
+    background: var(--green);
+    border-color: var(--green);
+    color: #fff;
+}
+
+.flow-steps li.current {
+    color: var(--ink);
+    font-weight: 600;
+}
+
+.flow-steps li.current .flow-num {
+    border-color: var(--green);
+    color: var(--green);
+}
+
+.flow-h {
+    font-size: var(--fs-md);
+    margin-bottom: var(--s3);
+}
+
+.choice-list {
+    display: grid;
+    gap: var(--s2);
+    max-width: 760px;
+}
+
+.choice {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    padding: var(--s3) var(--s4);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    cursor: pointer;
+}
+
+.choice:hover {
+    border-color: var(--ink-faint);
+}
+
+.choice.selected {
+    border-color: var(--green);
+    box-shadow: inset 3px 0 0 var(--green);
+}
+
+.choice input {
+    accent-color: var(--green);
+}
+
+.choice-main {
+    display: grid;
+    flex: 1;
+}
+
+.choice-price {
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.day-strip {
+    display: flex;
+    gap: var(--s2);
+    overflow-x: auto;
+    padding-bottom: var(--s2);
+}
+
+.day {
+    display: grid;
+    justify-items: center;
+    min-width: 64px;
+    padding: var(--s2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    cursor: pointer;
+    line-height: 1.3;
+}
+
+.day strong {
+    font-size: var(--fs-lg);
+}
+
+.day.selected {
+    background: var(--green);
+    border-color: var(--green);
+    color: #fff;
+}
+
+.slot-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+    gap: var(--s2);
+    max-width: 760px;
+}
+
+.slot {
+    display: grid;
+    gap: 2px;
+    padding: var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    cursor: pointer;
+    text-align: left;
+}
+
+.slot strong {
+    font-size: var(--fs-lg);
+}
+
+.slot .small {
+    color: var(--ink-soft);
+}
+
+.slot:disabled {
+    cursor: not-allowed;
+    background: transparent;
+    color: var(--ink-faint);
+    border-style: dashed;
+}
+
+.slot:disabled .small {
+    color: var(--ink-faint);
+}
+
+.slot.selected {
+    border-color: var(--green);
+    box-shadow: inset 0 0 0 1px var(--green);
+    background: var(--green-tint);
+}
+
+/* ---------- Quotation document ---------- */
+.quote {
+    border: 1px solid var(--line);
+    border-radius: var(--r-panel);
+    background: var(--surface);
+    overflow: hidden;
+}
+
+.quote.is-sent {
+    border-color: var(--amber);
+    box-shadow: 0 0 0 3px var(--amber-tint);
+}
+
+.quote-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--s3);
+    padding: var(--s3) var(--s4);
+    border-bottom: 1px solid var(--line-soft);
+    background: #f7f9f8;
+}
+
+.quote-body {
+    padding: var(--s4);
+    display: grid;
+    gap: var(--s3);
+}
+
+.quote-total td {
+    font-weight: 700;
+    border-top: 1px solid var(--line);
+}
+
+.quote.is-superseded {
+    opacity: 0.75;
+}
+
+/* ---------- Payment summary ---------- */
+.pay-sum {
+    display: grid;
+    gap: var(--s2);
+    font-size: var(--fs-sm);
+}
+
+.pay-sum div {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--s3);
+}
+
+.pay-sum .balance {
+    padding-top: var(--s2);
+    border-top: 1px solid var(--line);
+    font-size: var(--fs-md);
+    font-weight: 700;
+}

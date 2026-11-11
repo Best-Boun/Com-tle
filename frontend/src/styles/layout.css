@@ -1,0 +1,268 @@
+/* ---------- Public / customer layout: top bar + centered column ---------- */
+.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: rgba(238, 241, 239, 0.92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line-soft);
+}
+
+.topbar-inner {
+    max-width: var(--content);
+    margin: 0 auto;
+    padding: 0 var(--s5);
+    height: 64px;
+    display: flex;
+    align-items: center;
+    gap: var(--s5);
+}
+
+.brand {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--s2);
+    font-weight: 700;
+    font-size: var(--fs-lg);
+    color: var(--ink);
+    text-decoration: none;
+    letter-spacing: -0.02em;
+}
+
+.brand:hover {
+    color: var(--ink);
+}
+
+.brand-mark {
+    width: 26px;
+    height: 26px;
+}
+
+.topnav {
+    display: flex;
+    gap: var(--s1);
+    margin-right: auto;
+}
+
+.topnav a {
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-control);
+    color: var(--ink-soft);
+    text-decoration: none;
+    font-size: var(--fs-sm);
+    font-weight: 500;
+}
+
+.topnav a:hover {
+    color: var(--ink);
+    background: var(--grey-tint);
+}
+
+.topnav a.active {
+    color: var(--ink);
+    background: var(--surface);
+}
+
+.topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+}
+
+.menu-toggle {
+    display: none;
+}
+
+.page {
+    max-width: var(--content);
+    margin: 0 auto;
+    padding: var(--s6) var(--s5) var(--s8);
+}
+
+.footer {
+    border-top: 1px solid var(--line-soft);
+    padding: var(--s5);
+    text-align: left;
+    color: var(--ink-faint);
+    font-size: var(--fs-sm);
+}
+
+.footer-inner {
+    max-width: var(--content);
+    margin: 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: var(--s3);
+}
+
+@media (max-width: 820px) {
+    .menu-toggle {
+        display: inline-flex;
+    }
+
+    .topnav {
+        display: none;
+        position: absolute;
+        top: 64px;
+        left: 0;
+        right: 0;
+        flex-direction: column;
+        padding: var(--s3) var(--s5) var(--s4);
+        background: var(--paper);
+        border-bottom: 1px solid var(--line);
+    }
+
+    .topnav.open {
+        display: flex;
+    }
+
+    .topbar-inner {
+        justify-content: space-between;
+    }
+
+    .topbar-actions .hide-sm {
+        display: none;
+    }
+
+    .page {
+        padding: var(--s5) var(--s4) var(--s7);
+    }
+}
+
+/* ---------- Staff layout: sidebar + work area ---------- */
+.shell {
+    display: grid;
+    grid-template-columns: var(--sidebar) minmax(0, 1fr);
+    min-height: 100vh;
+}
+
+.sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s5);
+    padding: var(--s5) var(--s4);
+    background: var(--ink);
+    color: #dfe5e2;
+    overflow-y: auto;
+}
+
+.sidebar .brand {
+    color: #fff;
+    padding: 0 var(--s2);
+}
+
+.sidebar-role {
+    padding: 0 var(--s2);
+    font-size: var(--fs-xs);
+    color: #9aa7a1;
+}
+
+.sidenav {
+    display: grid;
+    gap: 2px;
+}
+
+.sidenav a {
+    display: flex;
+    align-items: center;
+    gap: var(--s3);
+    padding: var(--s2) var(--s3);
+    border-radius: var(--r-control);
+    color: #c3ccc8;
+    text-decoration: none;
+    font-size: var(--fs-sm);
+}
+
+.sidenav a:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+}
+
+.sidenav a.active {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    box-shadow: inset 3px 0 0 var(--amber);
+}
+
+.sidenav svg {
+    width: 18px;
+    height: 18px;
+    flex: none;
+}
+
+.sidebar-foot {
+    margin-top: auto;
+    display: grid;
+    gap: var(--s2);
+    font-size: var(--fs-sm);
+}
+
+.sidebar-foot .btn {
+    justify-content: flex-start;
+    color: #c3ccc8;
+}
+
+.sidebar-foot .btn:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #fff;
+}
+
+.workarea {
+    min-width: 0;
+    padding: var(--s6) var(--s6) var(--s8);
+}
+
+.shell-mobilebar {
+    display: none;
+}
+
+@media (max-width: 900px) {
+    .shell {
+        grid-template-columns: 1fr;
+    }
+
+    .shell-mobilebar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        height: 56px;
+        padding: 0 var(--s4);
+        background: var(--ink);
+    }
+
+    .shell-mobilebar .brand {
+        color: #fff;
+        font-size: var(--fs-md);
+    }
+
+    .shell-mobilebar .btn {
+        color: #fff;
+    }
+
+    .sidebar {
+        display: none;
+        position: fixed;
+        inset: 56px 0 0 0;
+        z-index: 30;
+        height: auto;
+    }
+
+    .sidebar.open {
+        display: flex;
+    }
+
+    .sidebar > .brand {
+        display: none;
+    }
+
+    .workarea {
+        padding: var(--s5) var(--s4) var(--s7);
+    }
+}
