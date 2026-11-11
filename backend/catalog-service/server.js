@@ -1,44 +1,24 @@
-
-const express = require("express");
-const helmet = require("helmet");
+require("dotenv").config({ path: require("node:path").resolve(__dirname, ".env") });
+const jwt = require("jsonwebtoken");
 const db = require("./src/config/database");
+const { createApp } = require("./src/app");
+const { createServiceRepository } = require("./src/repositories/serviceRepository");
+const { createCatalogService } = require("./src/services/catalogService");
 const {
-    notFoundHandler,
-    errorHandler
-} = require("../shared/middleware/errorMiddleware");
-require("dotenv").config();
+    loadServiceJwtConfig,
+    createAuthenticate
+} = require("../shared/middleware/serviceAuth");
 
-const app = express();
 const PORT = process.env.PORT || 3003;
+const jwtConfig = loadServiceJwtConfig(process.env, { baseDir: __dirname });
 
-app.use(helmet());
-app.use(express.json());
-
-app.get("/health", async (req, res) => {
-    try {
-        await db.raw("SELECT 1");
-
-        res.status(200).json({
-            success: true,
-            service: "catalog-service",
-            status: "running",
-            database: "connected"
-        });
-
-    } catch (error) {
-        console.error("Database health check failed:", error.message);
-
-        res.status(503).json({
-            success: false,
-            service: "catalog-service",
-            status: "running",
-            database: "disconnected"
-        });
-    }
+const app = createApp({
+    catalogService: createCatalogService({
+        serviceRepository: createServiceRepository(db)
+    }),
+    authenticate: createAuthenticate({ jwt, ...jwtConfig }),
+    healthCheck: () => db.raw("SELECT 1")
 });
-
-app.use(notFoundHandler);
-app.use(errorHandler);
 
 const server = app.listen(PORT, () => {
     console.log(`Catalog Service running on port ${PORT}`);
