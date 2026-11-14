@@ -506,6 +506,45 @@ function createPaymentService({
         }), "Payment void unavailable");
     }
 
+    // ---- work order payment lock ---------------------------------------------
+    // A locked work order refuses new payments (e.g. a dispute or a bill under
+    // review). payment_audit_logs needs a payment or refund target, so a lock
+    // has no audit row; the lock row itself keeps the reason and time.
+
+    async function setWorkOrderLock(authContext, workOrderId, input, locked) {
+        await requirePermission(authContext, PERMISSIONS.RECORD);
+        const targetId = parse(id, workOrderId, "Invalid Work Order ID");
+        const { reason: lockReason } = parse(voidSchema, input,
+            locked ? "A lock reason is required" : "An unlock reason is required");
+        return run(() => db.transaction(async (trx) => {
+            if (!await latestBill(trx, targetId)) {
+                throw new AppError("No issued bill for this work order", 404);
+            }
+            const lock = await lockWorkOrder(trx, targetId);
+            if (Boolean(lock.is_locked) === locked) {
+                throw new AppError(locked ? "Work order is already locked" : "Work order is not locked", 409);
+            }
+            const lockedAt = locked ? new Date(now()) : null;
+            await trx("payment_locks").where({ work_order_id: targetId }).update({
+                is_locked: locked,
+                lock_reason: locked ? lockReason : null,
+                locked_at: lockedAt,
+                source_event_id: null
+            });
+            return {
+                work_order_id: targetId,
+                is_locked: locked,
+                lock_reason: locked ? lockReason : null,
+                locked_at: lockedAt
+            };
+        }), "Payment lock unavailable");
+    }
+
+    const lockWorkOrderPayments = (authContext, workOrderId, input) =>
+        setWorkOrderLock(authContext, workOrderId, input, true);
+    const unlockWorkOrderPayments = (authContext, workOrderId, input) =>
+        setWorkOrderLock(authContext, workOrderId, input, false);
+
     // ---- balances and lists ---------------------------------------------------
 
     async function getBalance(authContext, workOrderId) {
@@ -520,9 +559,13 @@ function createPaymentService({
             if (!bill) {
                 throw new AppError("No issued bill for this work order", 404);
             }
-            const lock = await db("payment_locks").select("is_locked")
+            const lock = await db("payment_locks").select("is_locked", "lock_reason", "locked_at")
                 .where({ work_order_id: targetId }).first();
-            return balanceView(bill, await totalsFor(db, targetId), lock);
+            const view = balanceView(bill, await totalsFor(db, targetId), lock);
+            // The reason is internal (e.g. a dispute note): admins only.
+            return canViewAll && view.is_locked
+                ? { ...view, lock_reason: lock.lock_reason, locked_at: lock.locked_at }
+                : view;
         }, "Payment balance unavailable");
     }
 
@@ -799,6 +842,8 @@ function createPaymentService({
         registerBill,
         recordPayment,
         voidPayment,
+        lockWorkOrderPayments,
+        unlockWorkOrderPayments,
         getBalance,
         listPayments,
         listBalances,
