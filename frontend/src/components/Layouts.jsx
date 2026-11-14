@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useI18n } from "../i18n/I18nProvider.jsx";
 import { homeFor, useAuth } from "../auth/AuthProvider.jsx";
-import { api } from "../api/index.js";
+import { api, USING_MOCK } from "../api/index.js";
 import { BrandMark, Icon } from "./icons.jsx";
 
 export function LangToggle({ className = "btn btn-ghost btn-sm" }) {
@@ -94,7 +94,9 @@ function Footer() {
             <div className="footer-inner">
                 <span>SmartFix · {L("ร้านซ่อมคอมพิวเตอร์ เปิด 09:00–17:00 ทุกวัน", "Computer repair, open daily 09:00–17:00")}</span>
                 <span>
-                    {L("ตอนนี้ใช้ข้อมูลตัวอย่าง (ยังไม่ต่อ API)", "Using demo data (API not connected yet)")}{" "}
+                    {USING_MOCK
+                        ? L("ตอนนี้ใช้ข้อมูลตัวอย่าง (ยังไม่ต่อ API)", "Using demo data (API not connected yet)")
+                        : L("บัญชีและโปรไฟล์ใช้ API จริง ส่วนอื่นยังเป็นข้อมูลตัวอย่าง", "Accounts and profile use the real API; other pages use demo data")}{" "}
                     <button type="button" className="btn btn-ghost btn-sm" onClick={reset}>{L("รีเซ็ตข้อมูลตัวอย่าง", "Reset demo data")}</button>
                 </span>
             </div>

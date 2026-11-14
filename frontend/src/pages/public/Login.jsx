@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useI18n } from "../../i18n/I18nProvider.jsx";
 import { homeFor, useAuth } from "../../auth/AuthProvider.jsx";
-import { api } from "../../api/index.js";
+import { api, USING_MOCK } from "../../api/index.js";
 import { errorText } from "../../utils/errors.js";
 import { TextField } from "../../components/ui.jsx";
 import "./home.css";
@@ -45,7 +45,8 @@ export default function Login() {
                 <p className="small muted">{L("ยังไม่มีบัญชี?", "No account yet?")} <Link to="/register">{L("สมัครสมาชิก", "Create one")}</Link></p>
             </form>
 
-            <section className="stack">
+            {/* Demo accounts exist only in the mock backend; hide them when auth is real. */}
+            {USING_MOCK && <section className="stack">
                 <h2>{L("ทดลองใช้ด้วยบัญชีตัวอย่าง", "Try a demo account")}</h2>
                 <p className="muted small">
                     {L("ตอนนี้หน้าเว็บใช้ข้อมูลตัวอย่าง กดเพื่อเข้าดูหน้าของแต่ละบทบาทได้เลย (รหัสผ่าน ", "The site runs on demo data. Pick a role to see its screens (password ")}
@@ -59,7 +60,7 @@ export default function Login() {
                         </button>
                     ))}
                 </div>
-            </section>
+            </section>}
         </div>
     );
 }

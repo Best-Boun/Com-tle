@@ -1,15 +1,18 @@
 /**
  * Single entry point for all data access.
  *
- * Today every call goes to the in-browser demo backend (./mock).
- * When the real services are reachable through the API Gateway, add an
- * implementation with the same function names (e.g. ./http/bookings.js)
- * and switch per module here — pages don't need to change.
+ * Every module uses the in-browser demo backend (./mock) unless
+ * VITE_USE_MOCK=false, in which case modules that have a real implementation
+ * (./http/*) call the API Gateway instead. Pages don't need to change.
+ * Real implementations today: auth only.
  */
 import * as mock from "./mock/index.js";
+import { auth as httpAuth } from "./http/auth.js";
+
+export const USING_MOCK = import.meta.env.VITE_USE_MOCK !== "false";
 
 export const api = {
-    auth: mock.auth,
+    auth: USING_MOCK ? mock.auth : httpAuth,
     catalog: mock.catalog,
     bookings: mock.bookings,
     repairs: mock.repairs,
@@ -18,5 +21,3 @@ export const api = {
     dashboard: mock.dashboard,
     demo: mock.demo
 };
-
-export const USING_MOCK = true;
