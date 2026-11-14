@@ -347,6 +347,43 @@ test("internal permission checks use current database permissions and explicitly
     assert.equal(lookups.length, 2);
 });
 
+test("internal checks enforce ADMIN_ONLY for payment admin codes and union for others", async () => {
+    const lookups = [];
+    const service = createInternalPermissionService({
+        permissionService: {
+            async activeUserHasPermission(userId, permission, options) {
+                lookups.push([permission, options?.requiredRole]);
+                return true;
+            }
+        }
+    });
+    for (const permission of [
+        PERMISSIONS.PAYMENT_RECORD,
+        PERMISSIONS.PAYMENT_REFUND,
+        PERMISSIONS.PAYMENT_VIEW_ALL
+    ]) {
+        assert.equal((await service.checkPermission({ serviceId: "payment-service" }, {
+            user_id: "user-1",
+            permission
+        })).allowed, true, permission);
+    }
+    await service.checkPermission({ serviceId: "payment-service" }, {
+        user_id: "user-1",
+        permission: PERMISSIONS.PAYMENT_VIEW_OWN,
+        resource: { work_order_id: "work-order-1" }
+    });
+    assert.deepEqual(lookups, [
+        [PERMISSIONS.PAYMENT_RECORD, "ADMIN"],
+        [PERMISSIONS.PAYMENT_REFUND, "ADMIN"],
+        [PERMISSIONS.PAYMENT_VIEW_ALL, "ADMIN"],
+        [PERMISSIONS.PAYMENT_VIEW_OWN, undefined]
+    ]);
+    assert.equal((await service.checkPermission({ serviceId: "payment-service" }, {
+        user_id: "user-1",
+        permission: "can_refund"
+    })).allowed, false);
+});
+
 test("internal permission check denies user-administration codes without a lookup", async () => {
     const lookups = [];
     const service = createInternalPermissionService({

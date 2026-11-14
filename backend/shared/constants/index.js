@@ -33,6 +33,8 @@ const PERMISSIONS = Object.freeze({
     INVENTORY_ISSUE: "inventory.issue",
     PAYMENT_VIEW_OWN: "payment.view_own",
     PAYMENT_RECORD: "payment.record",
+    PAYMENT_VIEW_ALL: "payment.view_all",
+    PAYMENT_REFUND: "payment.refund",
     HANDOVER_COMPLETE: "handover.complete"
 });
 

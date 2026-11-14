@@ -31,12 +31,20 @@ const db = knex({
         port: Number(process.env.DB_PORT),
         user: process.env.DB_USER,
         password: process.env.DB_PASSWORD,
-        database: process.env.DB_NAME
+        database: process.env.DB_NAME,
+        enableKeepAlive: true,
+        keepAliveInitialDelay: 10000
     },
 
     pool: {
         min: Number(process.env.DB_POOL_MIN || 0),
-        max: Number(process.env.DB_POOL_MAX || 5)
+        max: Number(process.env.DB_POOL_MAX || 5),
+        // Railway's proxy occasionally closes a new connection during the
+        // handshake. Retry creating it (until acquireConnectionTimeout) instead
+        // of failing the request on the first attempt.
+        propagateCreateError: false,
+        createRetryIntervalMillis: 200,
+        idleTimeoutMillis: 30000
     },
 
     acquireConnectionTimeout: 10000

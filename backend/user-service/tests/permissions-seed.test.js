@@ -136,6 +136,8 @@ test("permission seed preserves definitions and creates only approved mappings",
     const expected = [
         ...[
             PERMISSIONS.PAYMENT_RECORD,
+            PERMISSIONS.PAYMENT_VIEW_ALL,
+            PERMISSIONS.PAYMENT_REFUND,
             ...Object.values(ADMIN_PERMISSIONS),
             ...Object.values(CUSTOMER_MERGE_PERMISSIONS),
             ...ownProfile
@@ -160,6 +162,8 @@ test("seed never grants admin, merge, or unapproved permissions to non-admin rol
     for (const roleCode of [USER_ROLES.CUSTOMER, USER_ROLES.TECHNICIAN]) {
         for (const permissionCode of [
             PERMISSIONS.PAYMENT_RECORD,
+            PERMISSIONS.PAYMENT_VIEW_ALL,
+            PERMISSIONS.PAYMENT_REFUND,
             PERMISSIONS.BOOKING_MANAGE,
             ...Object.values(ADMIN_PERMISSIONS),
             ...Object.values(CUSTOMER_MERGE_PERMISSIONS)
