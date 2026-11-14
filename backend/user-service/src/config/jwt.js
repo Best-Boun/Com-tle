@@ -19,9 +19,17 @@ function loadJwtConfig(env = process.env) {
         throw new Error("JWT_EXPIRES_IN must be a positive number of seconds");
     }
 
+    if (!/^[1-9]\d*$/.test(env.JWT_REFRESH_EXPIRES_IN || "")) {
+        throw new Error("JWT_REFRESH_EXPIRES_IN must be a positive number of seconds");
+    }
+
     const expiresIn = Number(env.JWT_EXPIRES_IN);
+    const refreshExpiresIn = Number(env.JWT_REFRESH_EXPIRES_IN);
     if (!Number.isSafeInteger(expiresIn)) {
         throw new Error("JWT_EXPIRES_IN must be a positive number of seconds");
+    }
+    if (!Number.isSafeInteger(refreshExpiresIn)) {
+        throw new Error("JWT_REFRESH_EXPIRES_IN must be a positive number of seconds");
     }
 
     const serviceRoot = path.resolve(__dirname, "../..");
@@ -42,6 +50,7 @@ function loadJwtConfig(env = process.env) {
         issuer: env.JWT_ISSUER,
         audience: env.JWT_AUDIENCE,
         expiresIn,
+        refreshExpiresIn,
         privateKey
     };
 }

@@ -1,0 +1,5 @@
+const INTERNAL_JWT_CLOCK_SKEW_SECONDS = 30;
+
+module.exports = {
+    INTERNAL_JWT_CLOCK_SKEW_SECONDS
+};

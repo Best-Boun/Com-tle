@@ -1,0 +1,57 @@
+const { z } = require("zod");
+const { PERMISSIONS } = require("../../../shared/constants");
+const AppError = require("../../../shared/errors/AppError");
+const { ADMIN_PERMISSIONS } = require("../constants/adminPermissions");
+
+const knownPermissionCodes = new Set([
+    ...Object.values(PERMISSIONS),
+    ...Object.values(ADMIN_PERMISSIONS)
+]);
+const requestSchema = z.object({
+    user_id: z.string().trim().min(1).max(36),
+    permission: z.string().trim().min(1).max(100),
+    resource: z.object({
+        work_order_id: z.string().trim().min(1).max(36).optional(),
+        payment_id: z.string().trim().min(1).max(36).optional(),
+        refund_id: z.string().trim().min(1).max(36).optional()
+    }).strict().optional()
+}).strict();
+
+function createInternalPermissionService({ permissionService } = {}) {
+    if (!permissionService
+        || typeof permissionService.activeUserHasPermission !== "function") {
+        throw new Error("Permission service is required");
+    }
+
+    async function checkPermission(serviceAuth, input) {
+        if (!serviceAuth || typeof serviceAuth.serviceId !== "string") {
+            throw new AppError("Internal service authentication required", 401);
+        }
+        const parsed = requestSchema.safeParse(input);
+        if (!parsed.success) {
+            return null;
+        }
+
+        const { user_id: userId, permission, resource } = parsed.data;
+        if (permission === PERMISSIONS.PAYMENT_VIEW_OWN
+            && !resource?.work_order_id
+            && !resource?.payment_id) {
+            return null;
+        }
+        let allowed = false;
+        if (knownPermissionCodes.has(permission)) {
+            allowed = await permissionService.activeUserHasPermission(userId, permission);
+        }
+        return {
+            user_id: userId,
+            permission,
+            allowed: allowed === true
+        };
+    }
+
+    return { checkPermission };
+}
+
+module.exports = {
+    createInternalPermissionService
+};
