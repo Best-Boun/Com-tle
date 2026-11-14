@@ -1,58 +1,55 @@
 
-const express = require("express");
-const helmet = require("helmet");
-const db = require("./src/config/database");
-const {
-    notFoundHandler,
-    errorHandler
-} = require("../shared/middleware/errorMiddleware");
-require("dotenv").config();
+const path = require("node:path");
+const dotenv = require("dotenv");
+const { createApplication } = require("./src/app");
+const { createSecurityRuntime } = require("./src/securityRuntime");
 
-const app = express();
-const PORT = process.env.PORT || 3006;
+function startServer({ env = process.env, database } = {}) {
+    if (env === process.env) {
+        dotenv.config({ path: path.resolve(__dirname, ".env") });
+    }
 
-app.use(helmet());
-app.use(express.json());
+    const db = database || require("./src/config/database");
+    const securityRuntime = createSecurityRuntime({
+        env,
+        paymentDb: db
+    });
+    const app = createApplication({ db });
+    const port = env.PORT || 3006;
+    const server = app.listen(port, () => {
+        console.log(`Payment Service running on port ${port}`);
+    });
+    let shutdownStarted = false;
 
-app.get("/health", async (req, res) => {
-    try {
-        await db.raw("SELECT 1");
+    async function shutdown() {
+        if (shutdownStarted) {
+            return;
+        }
+        shutdownStarted = true;
+        console.log("Shutting down Payment Service...");
 
-        res.status(200).json({
-            success: true,
-            service: "payment-service",
-            status: "running",
-            database: "connected"
-        });
-
-    } catch (error) {
-        console.error("Database health check failed:", error.message);
-
-        res.status(503).json({
-            success: false,
-            service: "payment-service",
-            status: "running",
-            database: "disconnected"
+        server.close(async () => {
+            await db.destroy();
+            console.log("Payment Service stopped.");
+            process.exit(0);
         });
     }
-});
 
-app.use(notFoundHandler);
-app.use(errorHandler);
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
 
-const server = app.listen(PORT, () => {
-    console.log(`Payment Service running on port ${PORT}`);
-});
-
-async function shutdown() {
-    console.log("Shutting down Payment Service...");
-
-    server.close(async () => {
-        await db.destroy();
-        console.log("Payment Service stopped.");
-        process.exit(0);
+    return Object.freeze({
+        app,
+        server,
+        securityRuntime,
+        shutdown
     });
 }
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+if (require.main === module) {
+    startServer();
+}
+
+module.exports = {
+    startServer
+};
