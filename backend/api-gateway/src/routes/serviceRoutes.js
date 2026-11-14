@@ -16,7 +16,9 @@ const publicUserRoutePatterns = [
     ["GET", /^\/admin\/users(?:\/[^/]+)?$/],
     ["PATCH", /^\/admin\/users\/[^/]+\/status$/],
     ["PUT", /^\/admin\/users\/[^/]+\/roles\/[^/]+$/],
-    ["DELETE", /^\/admin\/users\/[^/]+\/roles\/[^/]+$/]
+    ["DELETE", /^\/admin\/users\/[^/]+\/roles\/[^/]+$/],
+    ["POST", /^\/admin\/customer-merge-requests$/],
+    ["POST", /^\/admin\/customer-merge-requests\/[^/]+\/(?:approve|reject|cancel)$/]
 ];
 
 const deniedProxyPrefixes = [
