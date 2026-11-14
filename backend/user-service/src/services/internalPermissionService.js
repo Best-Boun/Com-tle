@@ -5,6 +5,14 @@ const AppError = require("../../../shared/errors/AppError");
 // codes (user.*, customer.merge.*) are answered allowed:false without a lookup,
 // so internal callers cannot probe which users are administrators.
 const knownPermissionCodes = new Set(Object.values(PERMISSIONS));
+const { USER_ROLES } = require("../../../shared/constants");
+// Staff-only payment operations are admin operations: ADMIN_ONLY is decided
+// here, never by the calling service.
+const adminOnlyPermissionCodes = new Set([
+    PERMISSIONS.PAYMENT_RECORD,
+    PERMISSIONS.PAYMENT_REFUND,
+    PERMISSIONS.PAYMENT_VIEW_ALL
+]);
 const requestSchema = z.object({
     user_id: z.string().trim().min(1).max(36),
     permission: z.string().trim().min(1).max(100),
@@ -38,7 +46,13 @@ function createInternalPermissionService({ permissionService } = {}) {
         }
         let allowed = false;
         if (knownPermissionCodes.has(permission)) {
-            allowed = await permissionService.activeUserHasPermission(userId, permission);
+            allowed = adminOnlyPermissionCodes.has(permission)
+                ? await permissionService.activeUserHasPermission(
+                    userId,
+                    permission,
+                    { requiredRole: USER_ROLES.ADMIN }
+                )
+                : await permissionService.activeUserHasPermission(userId, permission);
         }
         return {
             user_id: userId,

@@ -157,6 +157,8 @@ test("permission seed and authorization work against the existing MySQL schema",
         const expectedAssignments = new Set([
             ...[
                 PERMISSIONS.PAYMENT_RECORD,
+                PERMISSIONS.PAYMENT_VIEW_ALL,
+                PERMISSIONS.PAYMENT_REFUND,
                 ...Object.values(ADMIN_PERMISSIONS),
                 ...Object.values(CUSTOMER_MERGE_PERMISSIONS),
                 ...ownProfile
