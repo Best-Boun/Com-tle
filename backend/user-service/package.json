@@ -7,7 +7,13 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "node --test tests/authService.test.js tests/jwtConfig.test.js tests/roles-seed.test.js tests/uuid.test.js",
+    "test": "node --test tests/authService.test.js tests/authRefresh.database.integration.test.js tests/auditLog.database.integration.test.js tests/permissionAuthorization.database.integration.test.js tests/internalTokenReplay.database.integration.test.js tests/freshBaseline.test.js tests/jwtConfig.test.js tests/roles-seed.test.js tests/permissions-seed.test.js tests/permissionService.test.js tests/permissionMigration.test.js tests/auditLogMigration.test.js tests/auditLogService.test.js tests/userAdministrationService.test.js tests/adminUsersRoutes.test.js tests/guestCustomerLinkingService.test.js tests/uuid.test.js tests/database.integration.test.js tests/userProfileService.test.js tests/usersRoutes.test.js tests/internalServiceAuth.test.js tests/internalRoutes.test.js tests/internalTokenReplayRepository.test.js tests/internalTokenReplayMigration.test.js tests/internalCustomerIdentity.test.js tests/internalCustomerIdentityRoutes.test.js tests/customerLocking.test.js tests/customerMergeMigration.test.js tests/customerMergeService.test.js tests/customerMergeRoutes.test.js tests/customerMergeExpiryWorker.test.js",
+    "test:permission-database": "node --test tests/permissionAuthorization.database.integration.test.js",
+    "test:database": "node --test tests/database.integration.test.js",
+    "test:baseline": "node --test tests/freshBaseline.test.js tests/internalTokenReplayMigration.test.js",
+    "test:http-harness:unit": "node --test tests/serverBinding.test.js tests/httpIntegrationHarnessConfig.test.js",
+    "test:railway-http": "node --test tests/railwayPermissionsHttp.integration.test.js",
+    "baseline:fresh": "node scripts/apply-fresh-baseline.js",
     "start": "node server.js"
   },
   "keywords": [],
