@@ -13,7 +13,7 @@ async function withApp(run) {
     const paymentService = Object.fromEntries([
         "registerBill", "recordPayment", "voidPayment", "getBalance", "listPayments",
         "listBalances", "listMyPayments", "requestRefund", "approveRefund", "rejectRefund",
-        "executeRefund", "listRefunds"
+        "executeRefund", "listRefunds", "lockWorkOrderPayments", "unlockWorkOrderPayments"
     ].map((name) => [name, record(name)]));
     paymentService.approveRefund = async () => {
         throw new AppError("A refund must be approved by someone other than the requester", 403);
@@ -72,6 +72,8 @@ test("routes pass the verified actor, body, params and Idempotency-Key to the se
             ["/balances", "GET", "listBalances", []],
             ["/balances/wo-9", "GET", "getBalance", ["wo-9"]],
             ["/my", "GET", "listMyPayments", []],
+            ["/work-orders/wo-2/lock", "POST", "lockWorkOrderPayments", ["wo-2", { reason: "x" }]],
+            ["/work-orders/wo-2/unlock", "POST", "unlockWorkOrderPayments", ["wo-2", { reason: "x" }]],
             ["/refunds?status=REQUESTED", "GET", "listRefunds", [{ status: "REQUESTED" }]],
             ["/refunds/r-1/reject", "POST", "rejectRefund", ["r-1", { reason: "x" }]],
             ["/refunds/r-1/execute", "POST", "executeRefund", ["r-1"]]

@@ -441,6 +441,8 @@ test("payment routes are proxied to Payment-Service only for mapped paths", asyn
             ["/api/payments/balances", "GET", "/balances"],
             ["/api/payments/balances/wo-1", "GET", "/balances/wo-1"],
             ["/api/payments/my", "GET", "/my"],
+            ["/api/payments/work-orders/wo-1/lock", "POST", "/work-orders/wo-1/lock"],
+            ["/api/payments/work-orders/wo-1/unlock", "POST", "/work-orders/wo-1/unlock"],
             ["/api/payments/refunds", "POST", "/refunds"],
             ["/api/payments/refunds", "GET", "/refunds"],
             ["/api/payments/refunds/r-1/approve", "POST", "/refunds/r-1/approve"],
@@ -459,7 +461,9 @@ test("payment routes are proxied to Payment-Service only for mapped paths", asyn
             ["/api/payments/pay-1", "DELETE"],
             ["/api/payments/refunds/r-1/cancel", "POST"],
             ["/api/payments/balances/wo-1/extra", "GET"],
-            ["/api/payments/internal/anything", "POST"]
+            ["/api/payments/internal/anything", "POST"],
+            ["/api/payments/work-orders/wo-1/lock", "GET"],
+            ["/api/payments/work-orders/wo-1/delete", "POST"]
         ]) {
             const response = await call(path, method);
             assert.equal(response.status, 404, `${method} ${path}`);

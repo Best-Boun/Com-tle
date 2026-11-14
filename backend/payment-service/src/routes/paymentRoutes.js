@@ -11,6 +11,7 @@ const { successResponse } = require("../../../shared/utils/responseFormatter");
 //   POST /refunds                  request a refund        (Idempotency-Key)
 //   GET  /refunds                  list refunds            (payment.view_all)
 //   POST /refunds/:refundId/approve|reject|execute
+//   POST /work-orders/:workOrderId/lock|unlock   stop or allow new payments (reason)
 //   GET  /my                       the caller's own bills and payments
 function createPaymentRouter({ paymentService, requireUserAuth }) {
     if (!paymentService || typeof requireUserAuth !== "function") {
@@ -38,6 +39,10 @@ function createPaymentRouter({ paymentService, requireUserAuth }) {
         (req) => paymentService.listBalances(req.auth)));
     router.get("/balances/:workOrderId", handle(200, "Balance",
         (req) => paymentService.getBalance(req.auth, req.params.workOrderId)));
+    router.post("/work-orders/:workOrderId/lock", handle(200, "Payments locked",
+        (req) => paymentService.lockWorkOrderPayments(req.auth, req.params.workOrderId, req.body)));
+    router.post("/work-orders/:workOrderId/unlock", handle(200, "Payments unlocked",
+        (req) => paymentService.unlockWorkOrderPayments(req.auth, req.params.workOrderId, req.body)));
     router.get("/my", handle(200, "My payments",
         (req) => paymentService.listMyPayments(req.auth)));
     router.post("/refunds", handle(201, "Refund requested",

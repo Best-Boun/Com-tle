@@ -36,6 +36,8 @@ test("every write is denied without the matching permission before the database 
     await assert.rejects(payments.registerBill(admin, {}), denied);
     await assert.rejects(payments.recordPayment(admin, {}, "key-12345"), denied);
     await assert.rejects(payments.voidPayment(admin, "p-1", { reason: "x" }), denied);
+    await assert.rejects(payments.lockWorkOrderPayments(admin, "wo-1", { reason: "x" }), denied);
+    await assert.rejects(payments.unlockWorkOrderPayments(admin, "wo-1", { reason: "x" }), denied);
     await assert.rejects(payments.requestRefund(admin, {}, "key-12345"), denied);
     await assert.rejects(payments.approveRefund(admin, "r-1"), denied);
     await assert.rejects(payments.rejectRefund(admin, "r-1", { reason: "x" }), denied);
@@ -73,6 +75,8 @@ test("invalid input is rejected with 400 before the database is used", async () 
     }
     await assert.rejects(payments.voidPayment(admin, "p-1", { reason: "  " }), bad);
     await assert.rejects(payments.rejectRefund(admin, "r-1", {}), bad);
+    await assert.rejects(payments.lockWorkOrderPayments(admin, "wo-1", {}), bad);
+    await assert.rejects(payments.unlockWorkOrderPayments(admin, "wo-1", { reason: " " }), bad);
     await assert.rejects(payments.requestRefund(admin, { payment_id: "p-1", amount: 5 }, "key-12345"), bad);
     await assert.rejects(payments.registerBill(admin, {
         work_order_id: "wo-1", bill_id: "b-1", bill_version: 1, customer_id: "c-1",

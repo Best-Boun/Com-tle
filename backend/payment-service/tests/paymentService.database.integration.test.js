@@ -169,13 +169,39 @@ test("payments: a revised bill version is what new payments are recorded against
     assert.equal(topUp.outstanding_balance, 0);
 });
 
-test("payments: locked work orders refuse new payments", options, async () => {
+test("lock: admins lock and unlock a work order; locked refuses new payments", options, async () => {
     const workOrderId = newWorkOrderId();
+    await assert.rejects(
+        payments.lockWorkOrderPayments(as(ADMIN_A), workOrderId, { reason: "Dispute" }),
+        (error) => error.statusCode === 404
+    );
     await issueBill(workOrderId, 300);
-    await db("payment_locks").where({ work_order_id: workOrderId })
-        .update({ is_locked: true, lock_reason: "Dispute", locked_at: new Date() });
+    await assert.rejects(
+        payments.lockWorkOrderPayments(as(CUSTOMER_USER), workOrderId, { reason: "x" }),
+        (error) => error.statusCode === 403
+    );
+    await assert.rejects(
+        payments.unlockWorkOrderPayments(as(ADMIN_A), workOrderId, { reason: "x" }),
+        (error) => error.statusCode === 409
+    );
+    const locked = await payments.lockWorkOrderPayments(as(ADMIN_A), workOrderId, { reason: "Dispute" });
+    assert.equal(locked.is_locked, true);
+    await assert.rejects(
+        payments.lockWorkOrderPayments(as(ADMIN_B), workOrderId, { reason: "again" }),
+        (error) => error.statusCode === 409
+    );
     await assert.rejects(pay(workOrderId, 100), (error) => error.statusCode === 423);
-    assert.equal((await payments.getBalance(as(ADMIN_A), workOrderId)).is_locked, true);
+
+    const adminView = await payments.getBalance(as(ADMIN_A), workOrderId);
+    assert.deepEqual([adminView.is_locked, adminView.lock_reason], [true, "Dispute"]);
+    const customerView = await payments.getBalance(as(CUSTOMER_USER), workOrderId);
+    assert.deepEqual([customerView.is_locked, customerView.lock_reason], [true, undefined]);
+
+    const unlocked = await payments.unlockWorkOrderPayments(as(ADMIN_B), workOrderId, { reason: "Resolved" });
+    assert.equal(unlocked.is_locked, false);
+    const row = await db("payment_locks").where({ work_order_id: workOrderId }).first();
+    assert.deepEqual([row.is_locked, row.lock_reason, row.locked_at], [0, null, null]);
+    assert.equal((await pay(workOrderId, 300)).outstanding_balance, 0);
 });
 
 test("idempotency: replay returns the first result, a changed body is refused", options, async () => {
