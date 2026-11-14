@@ -258,17 +258,43 @@ test("returns a gateway error when the User Service proxy target is unavailable"
     }
 });
 
-test("unmapped paths and service health endpoints are denied before proxying", async () => {
+test("approved User-Service routes are proxied while internal and unmapped routes are denied", async () => {
     await withGateway(async ({ request, getProxyCount }) => {
-        for (const path of [
-            "/api/users/profile",
-            "/api/bookings/health",
-            "/api/catalog/health",
-            "/api/repairs/health",
-            "/api/inventory/health",
-            "/api/payments/health"
+        const approvedRequests = [
+            ["/api/users/auth/refresh", postOptions()],
+            ["/api/users/auth/logout", postOptions()],
+            ["/api/users/users/me", {}],
+            ["/api/users/users/me/permissions", {}],
+            ["/api/users/users/me", { ...postOptions(), method: "PATCH" }],
+            ["/api/users/admin/users", {}],
+            ["/api/users/admin/users/user-1", {}],
+            ["/api/users/admin/users/user-1/status", {
+                ...postOptions(),
+                method: "PATCH"
+            }],
+            ["/api/users/admin/users/user-1/roles/TECHNICIAN", {
+                ...postOptions(),
+                method: "PUT"
+            }],
+            ["/api/users/admin/users/user-1/roles/TECHNICIAN", {
+                method: "DELETE"
+            }]
+        ];
+        for (const [path, options] of approvedRequests) {
+            const response = await request(path, options);
+            assert.equal(response.status, 200, path);
+        }
+
+        for (const [path, options] of [
+            ["/api/users/profile", {}],
+            ["/api/users/internal/permissions/check", postOptions()],
+            ["/api/bookings/health", {}],
+            ["/api/catalog/health", {}],
+            ["/api/repairs/health", {}],
+            ["/api/inventory/health", {}],
+            ["/api/payments/health", {}]
         ]) {
-            const response = await request(path);
+            const response = await request(path, options);
             assert.equal(response.status, 404, path);
         }
 
@@ -277,6 +303,25 @@ test("unmapped paths and service health endpoints are denied before proxying", a
             { method: "GET" }
         );
         assert.equal(wrongMethod.status, 404);
+        const invalidAdminMethod = await request(
+            "/api/users/admin/users/user-1",
+            { method: "DELETE" }
+        );
+        assert.equal(invalidAdminMethod.status, 404);
+        assert.equal(getProxyCount(), approvedRequests.length);
+    });
+});
+
+test("does not proxy service health endpoints through user routes", async () => {
+    await withGateway(async ({ request, getProxyCount }) => {
+        for (const path of [
+            "/api/users/profile",
+            "/api/users/health",
+            "/api/users/internal/customers/resolve"
+        ]) {
+            const response = await request(path);
+            assert.equal(response.status, 404, path);
+        }
         assert.equal(getProxyCount(), 0);
     });
 });
