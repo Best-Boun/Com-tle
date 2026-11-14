@@ -5,8 +5,19 @@ const {
 
 const publicUserRoutes = new Set([
     "POST /auth/register",
-    "POST /auth/login"
+    "POST /auth/login",
+    "POST /auth/refresh",
+    "POST /auth/logout"
 ]);
+
+const publicUserRoutePatterns = [
+    ["GET", /^\/users\/me(?:\/permissions)?$/],
+    ["PATCH", /^\/users\/me$/],
+    ["GET", /^\/admin\/users(?:\/[^/]+)?$/],
+    ["PATCH", /^\/admin\/users\/[^/]+\/status$/],
+    ["PUT", /^\/admin\/users\/[^/]+\/roles\/[^/]+$/],
+    ["DELETE", /^\/admin\/users\/[^/]+\/roles\/[^/]+$/]
+];
 
 const deniedProxyPrefixes = [
     "/api/bookings",
@@ -47,7 +58,11 @@ function registerServiceRoutes(app, {
         "/api/users",
         (req, res, next) => {
             const routeKey = `${req.method} ${req.path}`;
-            if (!publicUserRoutes.has(routeKey)) {
+            const isAllowed = publicUserRoutes.has(routeKey)
+                || publicUserRoutePatterns.some(([method, pathPattern]) => (
+                    req.method === method && pathPattern.test(req.path)
+                ));
+            if (!isAllowed) {
                 return denyUnmappedRoute(req, res);
             }
             return next();
