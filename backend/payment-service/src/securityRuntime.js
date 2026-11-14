@@ -15,8 +15,7 @@ const {
 
 function createSecurityRuntime({
     env = process.env,
-    fetchImplementation = globalThis.fetch,
-    paymentDb
+    fetchImplementation = globalThis.fetch
 } = {}) {
     const userJwtVerifierConfig = loadUserJwtVerifierConfig(env);
     const internalServiceTokenConfig = loadInternalServiceTokenConfig(env);
@@ -31,8 +30,7 @@ function createSecurityRuntime({
         internalServiceTokenIssuer,
         userServiceUrl: userServiceBaseUrl,
         fetchImplementation,
-        nodeEnv: env.NODE_ENV,
-        paymentDb
+        nodeEnv: env.NODE_ENV
     });
 
     return Object.freeze({

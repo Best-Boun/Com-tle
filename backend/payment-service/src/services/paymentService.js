@@ -1,1463 +1,817 @@
-const { randomUUID } = require("node:crypto");
+const { createHash, randomUUID } = require("node:crypto");
 const { z } = require("zod");
 const AppError = require("../../../shared/errors/AppError");
-const {
-    createAuditLogService,
-    getAuditRequestId
-} = require("./auditLogService");
 
-const requestSchema = z.object({
-    work_order_id: z.string().trim().min(1).max(36),
-    amount: z.string().regex(/^(0|[1-9]\d{0,9})(\.\d{1,2})?$/),
-    currency: z.string().regex(/^[A-Z]{3}$/),
-    payment_method: z.string().trim().min(1).max(50)
+// Payment-Service business rules on the Railway payment_db schema.
+// - Bills arrive as inbox_events (repair.bill.issued). Until Repair-Service
+//   publishes them, an admin registers them manually (source_service "manual").
+// - Amounts are whole baht (BIGINT). Balance = latest bill total
+//   - SUCCEEDED payments + COMPLETED refunds.
+// - Each work order has one payment_locks row: is_locked blocks recording, and
+//   SELECT ... FOR UPDATE on it serializes money changes for that work order.
+// - Every money write records payment_audit_logs and outbox_events in the same
+//   transaction; POST payment/refund require an Idempotency-Key.
+
+const PERMISSIONS = Object.freeze({
+    RECORD: "payment.record",
+    REFUND: "payment.refund",
+    VIEW_ALL: "payment.view_all",
+    VIEW_OWN: "payment.view_own"
+});
+const PAYMENT_METHODS = ["CASH", "TRANSFER", "CARD"];
+const CURRENCY = "THB";
+const BILL_EVENT = "repair.bill.issued";
+const ACTIVE_REFUND_STATUSES = ["REQUESTED", "APPROVED", "PROCESSING", "COMPLETED"];
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_AMOUNT = 10_000_000_000;
+
+const id = z.string().trim().min(1).max(36);
+const amount = z.union([
+    z.number().int(),
+    z.string().regex(/^[1-9]\d{0,10}$/).transform(Number)
+]).pipe(z.number().int().min(1).max(MAX_AMOUNT));
+const reason = z.string().trim().min(1).max(500);
+
+const billSchema = z.object({
+    work_order_id: id,
+    bill_id: id,
+    bill_version: z.number().int().min(1).max(1_000_000),
+    customer_id: id,
+    total_amount: amount,
+    currency: z.literal(CURRENCY).default(CURRENCY)
 }).strict();
-const refundRequestSchema = z.object({
-    payment_id: z.string().trim().min(1).max(36),
-    amount: z.string().regex(/^(0|[1-9]\d{0,9})(\.\d{1,2})?$/),
-    reason: z.string().trim().min(1).max(500)
+const paymentSchema = z.object({
+    work_order_id: id,
+    amount,
+    payment_method: z.enum(PAYMENT_METHODS),
+    reference_number: z.string().trim().min(1).max(100).optional()
 }).strict();
-const refundDecisionSchema = z.object({
-    refund_id: z.string().trim().min(1).max(36),
-    decision: z.enum(["APPROVED", "REJECTED"])
-}).strict();
-const refundExecutionSchema = z.object({
-    refund_id: z.string().trim().min(1).max(36)
-}).strict();
-const paginationFields = {
-    page: z.string().regex(/^[1-9]\d{0,6}$/).default("1"),
-    page_size: z.string().regex(/^[1-9]\d{0,2}$/).default("25"),
-    from: z.string().datetime({ offset: true }).optional(),
-    to: z.string().datetime({ offset: true }).optional()
+const voidSchema = z.object({ reason }).strict();
+const refundSchema = z.object({ payment_id: id, amount, reason }).strict();
+const rejectSchema = z.object({ reason }).strict();
+const idempotencyKeySchema = z.string().trim().regex(/^[A-Za-z0-9._:-]{8,100}$/);
+const pageFields = {
+    page: z.coerce.number().int().min(1).max(1_000_000).default(1),
+    page_size: z.coerce.number().int().min(1).max(100).default(25)
 };
-const paymentHistoryQuerySchema = z.object({
-    ...paginationFields,
-    status: z.enum(["PENDING", "COMPLETED", "FAILED", "CANCELLED"]).optional(),
-    payment_method: z.string().trim().min(1).max(50).optional()
+const paymentListSchema = z.object({
+    ...pageFields,
+    work_order_id: id.optional(),
+    status: z.enum(["PENDING", "SUCCEEDED", "FAILED", "VOIDED"]).optional(),
+    payment_method: z.enum(PAYMENT_METHODS).optional()
 }).strict();
-const refundHistoryQuerySchema = z.object({
-    ...paginationFields,
-    payment_id: z.string().trim().min(1).max(36).optional(),
-    work_order_id: z.string().trim().min(1).max(36).optional(),
-    status: z.enum([
-        "REQUESTED",
-        "APPROVED",
-        "REJECTED",
-        "PROCESSING",
-        "COMPLETED",
-        "FAILED",
-        "CANCELLED"
-    ]).optional()
+const refundListSchema = z.object({
+    ...pageFields,
+    work_order_id: id.optional(),
+    payment_id: id.optional(),
+    status: z.enum(["REQUESTED", "APPROVED", "REJECTED", "PROCESSING", "COMPLETED", "FAILED"])
+        .optional()
 }).strict();
-const PAYMENT_HISTORY_FIELDS = [
-    "payment_id",
-    "work_order_id",
-    "amount",
-    "currency",
-    "payment_method",
-    "status",
-    "created_at"
+
+const PAYMENT_FIELDS = [
+    "payment_id", "work_order_id", "bill_id", "bill_version", "amount", "currency",
+    "payment_method", "status", "reference_number", "recorded_by", "voided_by",
+    "void_reason", "voided_at", "paid_at", "created_at"
 ];
-const REFUND_HISTORY_FIELDS = [
-    "refunds.refund_id",
-    "refunds.payment_id",
-    "refunds.amount",
-    "refunds.currency",
-    "refunds.reason",
-    "refunds.status",
-    "refunds.initiated_by",
-    "refunds.reviewer_user_id",
-    "refunds.review_decision",
-    "refunds.reviewed_at",
-    "refunds.execution_result",
-    "refunds.created_at",
-    "refunds.updated_at"
+const OWN_PAYMENT_FIELDS = [
+    "payment_id", "work_order_id", "bill_id", "bill_version", "amount", "currency",
+    "payment_method", "status", "paid_at", "voided_at"
 ];
-const REFUND_RESERVED_STATUSES = [
-    "REQUESTED",
-    "APPROVED",
-    "PROCESSING",
-    "COMPLETED"
+const REFUND_FIELDS = [
+    "refund_id", "payment_id", "work_order_id", "amount", "currency", "status",
+    "requested_by", "approved_by", "reason", "rejection_reason", "requested_at",
+    "approved_at", "processed_at", "completed_at", "rejected_at"
 ];
 
-function toMinorUnits(value, fieldName) {
-    if (typeof value !== "string"
-        || !/^(0|[1-9]\d{0,9})(\.\d{1,2})?$/.test(value)) {
-        throw new AppError(`Invalid ${fieldName}`, 400);
+function parse(schema, input, message) {
+    const parsed = schema.safeParse(input ?? {});
+    if (!parsed.success) {
+        throw new AppError(message, 400);
     }
-
-    const [whole, fraction = ""] = value.split(".");
-    return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
+    return parsed.data;
 }
 
-function fromMinorUnits(value) {
-    return `${value / 100n}.${String(value % 100n).padStart(2, "0")}`;
+function toAmount(value) {
+    const number = Number(value);
+    if (!Number.isSafeInteger(number)) {
+        throw new AppError("Stored payment amount is invalid", 500);
+    }
+    return number;
 }
 
-function storedAmountToMinorUnits(value) {
+function parsePayload(value) {
+    if (value && typeof value === "object") {
+        return value;
+    }
     try {
-        const amount = toMinorUnits(value, "stored amount");
-        if (amount <= 0n) {
-            throw new Error("Stored amount must be positive");
-        }
-        return amount;
+        return JSON.parse(value);
     } catch {
-        throw new AppError("Payment account balance is inconsistent", 409);
+        return null;
     }
 }
 
-function assertCurrencyMatches(value, expectedCurrency) {
-    if (!/^[A-Z]{3}$/.test(value) || value !== expectedCurrency) {
-        throw new AppError("Payment account balance has inconsistent currencies", 409);
+function stableJson(value) {
+    if (Array.isArray(value)) {
+        return `[${value.map(stableJson).join(",")}]`;
     }
+    if (value && typeof value === "object") {
+        return `{${Object.keys(value).sort()
+            .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+    }
+    return JSON.stringify(value);
 }
 
-function assertHistoryCurrency(value, expectedCurrency, entity) {
-    if (!/^[A-Z]{3}$/.test(value) || value !== expectedCurrency) {
-        throw new AppError(`${entity} contains inconsistent currencies`, 409);
-    }
+function isDeadlock(error) {
+    return error?.code === "ER_LOCK_DEADLOCK" || error?.errno === 1213;
 }
 
-async function calculateBalance(trx, account) {
-    if (!/^[A-Z]{3}$/.test(account.currency)) {
-        throw new AppError("Payment account balance has an invalid currency", 409);
-    }
-
-    const amountDue = storedAmountToMinorUnits(account.amount_due);
-    const completedPayments = await trx("payments")
-        .select("payment_id", "amount", "currency")
-        .where({
-            work_order_id: account.work_order_id,
-            status: "COMPLETED"
-        });
-    let completedPaymentsTotal = 0n;
-    for (const payment of completedPayments) {
-        assertCurrencyMatches(payment.currency, account.currency);
-        completedPaymentsTotal += storedAmountToMinorUnits(payment.amount);
-    }
-
-    let completedRefundsTotal = 0n;
-    if (completedPayments.length > 0) {
-        const completedRefunds = await trx("refunds")
-            .select("amount", "currency")
-            .whereIn(
-                "payment_id",
-                completedPayments.map((payment) => payment.payment_id)
-            )
-            .where({ status: "COMPLETED" });
-        for (const refund of completedRefunds) {
-            assertCurrencyMatches(refund.currency, account.currency);
-            completedRefundsTotal += storedAmountToMinorUnits(refund.amount);
-        }
-    }
-    if (completedRefundsTotal > completedPaymentsTotal) {
-        throw new AppError("Payment account balance is inconsistent", 409);
-    }
-
-    const outstandingBalance = amountDue - completedPaymentsTotal + completedRefundsTotal;
-    if (outstandingBalance < 0n) {
-        throw new AppError("Payment account balance is inconsistent", 409);
-    }
-
-    return {
-        work_order_id: account.work_order_id,
-        currency: account.currency,
-        amount_due: fromMinorUnits(amountDue),
-        completed_payments_total: fromMinorUnits(completedPaymentsTotal),
-        completed_refunds_total: fromMinorUnits(completedRefundsTotal),
-        outstanding_balance: fromMinorUnits(outstandingBalance),
-        amountDue,
-        completedPaymentsTotal,
-        completedRefundsTotal,
-        outstandingBalance
-    };
-}
-
-function trustedDependencyError(error, message) {
-    if (error instanceof AppError) {
-        return error;
-    }
-    return new AppError(message, 503);
+function isDuplicateKey(error) {
+    return error?.code === "ER_DUP_ENTRY" || error?.errno === 1062;
 }
 
 function createPaymentService({
     db,
-    authorizePaymentRecorder,
-    authorizePaymentQuery,
-    authorizeRefundQuery,
-    authorizeRefundActor,
-    refundProvider,
-    allowTestRefundProvider = false,
-    verifyApprovedPaymentAccount,
-    isApprovedPaymentMethod,
+    requestPermission,
+    requestCustomerId,
     createId = randomUUID,
-    createAuditId = randomUUID,
     now = Date.now
 } = {}) {
     if (!db
-        || typeof authorizePaymentRecorder !== "function"
-        || typeof verifyApprovedPaymentAccount !== "function"
-        || typeof isApprovedPaymentMethod !== "function") {
-        throw new Error(
-            "Database, trusted payment authorization, approved-account verifier, "
-            + "and payment-method validator are required"
+        || typeof requestPermission !== "function"
+        || typeof requestCustomerId !== "function") {
+        throw new Error("Database, permission checker and customer resolver are required");
+    }
+
+    function actorOf(authContext) {
+        const userId = authContext?.userId;
+        if (typeof userId !== "string" || !userId || userId.length > 36) {
+            throw new AppError("Authentication required", 401);
+        }
+        return userId;
+    }
+
+    async function hasPermission(authContext, permission, resource) {
+        try {
+            return (await requestPermission(authContext, permission, resource)) === true;
+        } catch (error) {
+            if (error instanceof AppError) {
+                throw error;
+            }
+            throw new AppError("Payment authorization unavailable", 503);
+        }
+    }
+
+    async function requirePermission(authContext, permission, resource) {
+        const actor = actorOf(authContext);
+        if (!await hasPermission(authContext, permission, resource)) {
+            throw new AppError("Not authorized for this payment operation", 403);
+        }
+        return actor;
+    }
+
+    // Unexpected failures (DB down, constraint we did not anticipate) never leak.
+    // A transaction InnoDB picked as a deadlock victim was rolled back in full,
+    // so it is safe to run it again.
+    async function run(work, message) {
+        for (let attempt = 1; ; attempt += 1) {
+            try {
+                return await work();
+            } catch (error) {
+                if (isDeadlock(error) && attempt < 3) {
+                    continue;
+                }
+                throw toServiceError(error, message);
+            }
+        }
+    }
+
+    function toServiceError(error, message) {
+        if (error instanceof AppError) {
+            return error;
+        }
+        const unavailable = new AppError(message, 503);
+        unavailable.cause = error;
+        return unavailable;
+    }
+
+    // ---- per-work-order state -------------------------------------------------
+
+    // Lock first; create only when missing. INSERT IGNORE on an existing row
+    // takes a shared lock, and upgrading it under concurrency deadlocks.
+    async function lockWorkOrder(trx, workOrderId) {
+        const select = () => trx("payment_locks")
+            .select("work_order_id", "is_locked", "lock_reason")
+            .where({ work_order_id: workOrderId })
+            .forUpdate()
+            .first();
+        const existing = await select();
+        if (existing) {
+            return existing;
+        }
+        await trx.raw(
+            "INSERT IGNORE INTO payment_locks (lock_id, work_order_id, is_locked) VALUES (?, ?, false)",
+            [createId(), workOrderId]
         );
-    }
-    const auditLog = createAuditLogService({ createId: createAuditId, now });
-    const refundProviderConfigured = typeof refundProvider?.executeRefund === "function"
-        && (refundProvider.trusted === true
-            || (refundProvider.testOnly === true
-                && allowTestRefundProvider === true
-                && process.env.NODE_ENV !== "production"));
-
-    async function recordAudit(trx, authContext, event) {
-        return auditLog.record(trx, {
-            ...event,
-            actor_user_id: event.actor_user_id || null,
-            request_id: getAuditRequestId(authContext),
-            occurred_at: new Date(now()),
-            metadata: event.metadata || null
-        });
+        return select();
     }
 
-    async function recordRejectedPayment(actorUserId, authContext, reasonCode) {
-        await db.transaction(async (trx) => {
-            await recordAudit(trx, authContext, {
-                event_key: `payment.record.rejected:${getAuditRequestId(authContext) || createId()}`,
-                actor_user_id: actorUserId,
-                action: "payment.record.rejected",
-                target_entity_type: "PAYMENT",
-                target_entity_id: null,
-                outcome: "FAILURE",
-                metadata: { reason_code: reasonCode }
-            });
-        });
-    }
-
-    async function recordPayment(authContext, input) {
-        let actorUserId;
-        try {
-            actorUserId = await authorizePaymentRecorder(authContext);
-        } catch (error) {
-            throw trustedDependencyError(error, "Payment authorization unavailable");
+    async function billsFor(trx, workOrderIds) {
+        if (workOrderIds !== null && workOrderIds.length === 0) {
+            return new Map();
         }
-        if (typeof actorUserId !== "string"
-            || actorUserId.trim().length === 0
-            || actorUserId.trim().length > 36) {
-            throw new AppError("Payment recording is not authorized", 403);
+        const query = trx("inbox_events")
+            .select("work_order_id", "payload", "received_at")
+            .where({ event_type: BILL_EVENT, status: "PROCESSED" });
+        if (workOrderIds !== null) {
+            query.whereIn("work_order_id", workOrderIds);
         }
-        actorUserId = actorUserId.trim();
-
-        const parsed = requestSchema.safeParse(input);
-        if (!parsed.success) {
-            await recordRejectedPayment(actorUserId, authContext, "invalid_request");
-            throw new AppError("Invalid payment details", 400);
-        }
-        let paymentAmount;
-        try {
-            paymentAmount = toMinorUnits(parsed.data.amount, "payment amount");
-        } catch (error) {
-            await recordRejectedPayment(actorUserId, authContext, "invalid_amount");
-            throw error;
-        }
-        if (paymentAmount <= 0n) {
-            await recordRejectedPayment(actorUserId, authContext, "invalid_amount");
-            throw new AppError("Payment amount must be greater than zero", 400);
-        }
-
-        let methodAllowed;
-        try {
-            methodAllowed = await isApprovedPaymentMethod(parsed.data.payment_method);
-        } catch {
-            throw new AppError("Payment method validation unavailable", 503);
-        }
-        if (methodAllowed !== true) {
-            await recordRejectedPayment(actorUserId, authContext, "unsupported_method");
-            throw new AppError("Unsupported payment method", 400);
-        }
-
-        try {
-            return await db.transaction(async (trx) => {
-                const account = await trx("work_order_payment_accounts")
-                    .select("work_order_id", "amount_due", "currency")
-                    .where({ work_order_id: parsed.data.work_order_id })
-                    .forUpdate()
-                    .first();
-                if (!account) {
-                    throw new AppError("Payment account not found", 404);
-                }
-
-                let approvedAccount;
-                try {
-                    approvedAccount = await verifyApprovedPaymentAccount(trx, account);
-                } catch (error) {
-                    throw trustedDependencyError(
-                        error,
-                        "Approved quotation verification unavailable"
-                    );
-                }
-                if (approvedAccount !== true) {
-                    throw new AppError(
-                        "Payment account has no verified approved quotation",
-                        409
-                    );
-                }
-
-                if (account.currency !== parsed.data.currency) {
-                    throw new AppError("Payment currency does not match the account", 400);
-                }
-
-                const balance = await calculateBalance(trx, account);
-                if (balance.outstandingBalance <= 0n
-                    || paymentAmount > balance.outstandingBalance) {
-                    throw new AppError("Payment exceeds the outstanding balance", 409);
-                }
-
-                const paymentId = createId();
-                const occurredAt = new Date(now());
-                await trx("payments").insert({
-                    payment_id: paymentId,
-                    work_order_id: account.work_order_id,
-                    amount: fromMinorUnits(paymentAmount),
-                    currency: account.currency,
-                    payment_method: parsed.data.payment_method,
-                    recorded_by: actorUserId,
-                    status: "COMPLETED",
-                    created_at: occurredAt,
-                    updated_at: occurredAt
-                });
-                await recordAudit(trx, authContext, {
-                    event_key: `payment.recorded:${paymentId}`,
-                    actor_user_id: actorUserId,
-                    action: "payment.recorded",
-                    target_entity_type: "PAYMENT",
-                    target_entity_id: paymentId,
-                    outcome: "SUCCESS",
-                    metadata: {
-                        amount: fromMinorUnits(paymentAmount),
-                        currency: account.currency,
-                        payment_method: parsed.data.payment_method
-                    }
-                });
-
-                return {
-                    payment_id: paymentId,
-                    work_order_id: account.work_order_id,
-                    amount: fromMinorUnits(paymentAmount),
-                    currency: account.currency,
-                    payment_method: parsed.data.payment_method,
-                    status: "COMPLETED",
-                    recorded_by: actorUserId,
-                    paid_total: fromMinorUnits(
-                        balance.completedPaymentsTotal + paymentAmount
-                    ),
-                    outstanding_balance: fromMinorUnits(
-                        balance.outstandingBalance - paymentAmount
-                    ),
-                    created_at: occurredAt
-                };
-            });
-        } catch (error) {
-            if (error instanceof AppError) {
-                const rejectedReasons = new Map([
-                    ["Payment currency does not match the account", "currency_mismatch"],
-                    ["Payment exceeds the outstanding balance", "overpayment"],
-                    ["Payment account balance is inconsistent", "balance_inconsistent"],
-                    [
-                        "Payment account balance has inconsistent currencies",
-                        "currency_inconsistent"
-                    ],
-                    [
-                        "Payment account balance has an invalid currency",
-                        "currency_inconsistent"
-                    ]
-                ]);
-                const reasonCode = rejectedReasons.get(error.message);
-                if (reasonCode) {
-                    await recordRejectedPayment(actorUserId, authContext, reasonCode);
-                }
-                throw error;
+        const latest = new Map();
+        for (const row of await query) {
+            const payload = parsePayload(row.payload);
+            if (!payload || payload.work_order_id !== row.work_order_id) {
+                continue;
             }
-            throw new AppError("Payment recording unavailable", 503);
-        }
-    }
-
-    async function getBalance(workOrderId) {
-        if (typeof workOrderId !== "string"
-            || workOrderId.trim().length === 0
-            || workOrderId.trim().length > 36) {
-            throw new AppError("Invalid Work Order ID", 400);
-        }
-
-        try {
-            return await db.transaction(async (trx) => {
-                const account = await trx("work_order_payment_accounts")
-                    .select("work_order_id", "amount_due", "currency")
-                    .where({ work_order_id: workOrderId.trim() })
-                    .forUpdate()
-                    .first();
-                if (!account) {
-                    throw new AppError("Payment account not found", 404);
-                }
-
-                let approvedAccount;
-                try {
-                    approvedAccount = await verifyApprovedPaymentAccount(trx, account);
-                } catch (error) {
-                    throw trustedDependencyError(
-                        error,
-                        "Approved quotation verification unavailable"
-                    );
-                }
-                if (approvedAccount !== true) {
-                    throw new AppError(
-                        "Payment account has no verified approved quotation",
-                        409
-                    );
-                }
-
-                const balance = await calculateBalance(trx, account);
-                return {
-                    work_order_id: balance.work_order_id,
-                    currency: balance.currency,
-                    amount_due: balance.amount_due,
-                    completed_payments_total: balance.completed_payments_total,
-                    completed_refunds_total: balance.completed_refunds_total,
-                    outstanding_balance: balance.outstanding_balance
-                };
-            });
-        } catch (error) {
-            if (error instanceof AppError) {
-                throw error;
+            const current = latest.get(row.work_order_id);
+            if (!current || payload.bill_version > current.bill_version) {
+                latest.set(row.work_order_id, {
+                    work_order_id: row.work_order_id,
+                    bill_id: payload.bill_id,
+                    bill_version: payload.bill_version,
+                    customer_id: payload.customer_id,
+                    total_amount: toAmount(payload.total_amount),
+                    currency: payload.currency
+                });
             }
-            throw new AppError("Payment balance retrieval unavailable", 503);
         }
+        return latest;
     }
 
-    function parseHistoryQuery(schema, query) {
-        const parsed = schema.safeParse(query);
-        if (!parsed.success) {
-            throw new AppError("Invalid history query", 400);
-        }
-        const page = Number(parsed.data.page);
-        const pageSize = Number(parsed.data.page_size);
-        if (pageSize > 100 || page > 1_000_000) {
-            throw new AppError("Invalid pagination values", 400);
-        }
-        const from = parsed.data.from ? new Date(parsed.data.from) : undefined;
-        const to = parsed.data.to ? new Date(parsed.data.to) : undefined;
-        if (from && to && from > to) {
-            throw new AppError("Invalid date range", 400);
-        }
+    async function latestBill(trx, workOrderId) {
+        return (await billsFor(trx, [workOrderId])).get(workOrderId) || null;
+    }
+
+    async function totalsFor(trx, workOrderId) {
+        const [paid] = await trx("payments")
+            .sum({ total: "amount" })
+            .where({ work_order_id: workOrderId, status: "SUCCEEDED" });
+        const [refunded] = await trx("refunds")
+            .sum({ total: "amount" })
+            .where({ work_order_id: workOrderId, status: "COMPLETED" });
         return {
-            ...parsed.data,
-            page,
-            page_size: pageSize,
-            from,
-            to,
-            offset: (page - 1) * pageSize
+            paid_total: toAmount(paid?.total || 0),
+            refunded_total: toAmount(refunded?.total || 0)
         };
     }
 
-    async function authorizeQuery(provider, authContext, resource, message) {
-        if (typeof provider !== "function") {
-            throw new AppError(message, 503);
-        }
-        let allowed;
-        try {
-            allowed = await provider(authContext, resource);
-        } catch (error) {
-            throw trustedDependencyError(error, message);
-        }
-        if (allowed !== true && allowed?.allowed !== true) {
-            throw new AppError("Payment history access is not authorized", 403);
-        }
-        return allowed === true ? {} : allowed;
-    }
-
-    function safePaymentRow(row, includeRecordedBy = false) {
-        const result = {
-            payment_id: row.payment_id,
-            work_order_id: row.work_order_id,
-            amount: row.amount,
-            currency: row.currency,
-            payment_method: row.payment_method,
-            status: row.status,
-            created_at: row.created_at
+    function balanceView(bill, totals, lock) {
+        return {
+            work_order_id: bill.work_order_id,
+            bill_id: bill.bill_id,
+            bill_version: bill.bill_version,
+            currency: bill.currency,
+            bill_total: bill.total_amount,
+            paid_total: totals.paid_total,
+            refunded_total: totals.refunded_total,
+            outstanding_balance: bill.total_amount - totals.paid_total + totals.refunded_total,
+            is_locked: Boolean(lock?.is_locked)
         };
-        if (includeRecordedBy === true) {
-            result.recorded_by = row.recorded_by;
-        }
-        return result;
     }
 
-    async function verifyHistoryPaymentMethod(method) {
-        if (method === undefined) {
-            return;
-        }
-        let methodAllowed;
-        try {
-            methodAllowed = await isApprovedPaymentMethod(method);
-        } catch {
-            throw new AppError("Payment method validation unavailable", 503);
-        }
-        if (methodAllowed !== true) {
-            throw new AppError("Unsupported payment method", 400);
-        }
+    // ---- audit, outbox, idempotency ---------------------------------------
+
+    async function audit(trx, { paymentId = null, refundId = null, actor, action, reason: why = null, metadata = null }) {
+        await trx("payment_audit_logs").insert({
+            audit_id: createId(),
+            payment_id: paymentId,
+            refund_id: refundId,
+            actor_user_id: actor,
+            action,
+            reason: why,
+            metadata: metadata ? JSON.stringify(metadata) : null,
+            created_at: new Date(now())
+        });
     }
 
-    function applyDateRange(query, parsed) {
-        if (parsed.from) {
-            query.where("created_at", ">=", parsed.from);
-        }
-        if (parsed.to) {
-            query.where("created_at", "<=", parsed.to);
-        }
-        return query;
+    async function outbox(trx, { paymentId = null, refundId = null, type, payload }) {
+        await trx("outbox_events").insert({
+            event_id: createId(),
+            payment_id: paymentId,
+            refund_id: refundId,
+            event_type: type,
+            payload: JSON.stringify({ ...payload, occurred_at: new Date(now()).toISOString() }),
+            status: "PENDING",
+            created_at: new Date(now())
+        });
     }
 
-    async function getPaymentHistory(authContext, workOrderId, query = {}) {
-        if (typeof workOrderId !== "string"
-            || workOrderId.trim().length === 0
-            || workOrderId.trim().length > 36) {
-            throw new AppError("Invalid Work Order ID", 400);
+    // Runs `work` once per (actor, operation, key). The record is written in the
+    // same transaction, so a failed attempt leaves nothing behind and can retry.
+    async function idempotent(actor, operation, rawKey, request, work) {
+        const keyParsed = idempotencyKeySchema.safeParse(rawKey);
+        if (!keyParsed.success) {
+            throw new AppError("A valid Idempotency-Key header is required", 400);
         }
-        const parsed = parseHistoryQuery(paymentHistoryQuerySchema, query);
-        await verifyHistoryPaymentMethod(parsed.payment_method);
-        const normalizedWorkOrderId = workOrderId.trim();
-        const authorization = await authorizeQuery(
-            authorizePaymentQuery,
-            authContext,
-            { work_order_id: normalizedWorkOrderId },
-            "Payment history authorization unavailable"
-        );
+        const key = keyParsed.data;
+        const scopeKey = `user:${actor}`;
+        const requestHash = createHash("sha256").update(stableJson(request)).digest("hex");
 
-        try {
-            return await db.transaction(async (trx) => {
-                const account = await trx("work_order_payment_accounts")
-                    .select("work_order_id", "currency")
-                    .where({ work_order_id: normalizedWorkOrderId })
+        return db.transaction(async (trx) => {
+            const where = { scope_key: scopeKey, operation, idempotency_key: key };
+            const createdAt = new Date(now());
+            try {
+                await trx("idempotency_records").insert({
+                    idempotency_id: createId(),
+                    ...where,
+                    request_hash: requestHash,
+                    status: "PROCESSING",
+                    created_at: createdAt,
+                    expires_at: new Date(createdAt.getTime() + IDEMPOTENCY_TTL_MS)
+                });
+            } catch (error) {
+                if (!isDuplicateKey(error)) {
+                    throw error;
+                }
+                const existing = await trx("idempotency_records")
+                    .select("request_hash", "status", "response_snapshot", "expires_at")
+                    .where(where)
                     .first();
-                if (!account) {
-                    throw new AppError("Payment account not found", 404);
+                if (existing.request_hash !== requestHash) {
+                    throw new AppError("Idempotency-Key was already used for a different request", 422);
                 }
-
-                const base = () => {
-                    let builder = trx("payments")
-                        .where({ work_order_id: normalizedWorkOrderId });
-                    if (parsed.status) {
-                        builder = builder.where({ status: parsed.status });
-                    }
-                    if (parsed.payment_method) {
-                        builder = builder.where({
-                            payment_method: parsed.payment_method
-                        });
-                    }
-                    return applyDateRange(builder, parsed);
-                };
-                const countRow = await base().count({ total: "payment_id" }).first();
-                const rows = await base()
-                    .select(
-                        ...(authorization.include_recorded_by === true
-                            ? [...PAYMENT_HISTORY_FIELDS, "recorded_by"]
-                            : PAYMENT_HISTORY_FIELDS)
-                    )
-                    .orderBy("created_at", "desc")
-                    .orderBy("payment_id", "desc")
-                    .limit(parsed.page_size)
-                    .offset(parsed.offset);
-                for (const row of rows) {
-                    assertHistoryCurrency(
-                        row.currency,
-                        account.currency,
-                        "Payment history"
-                    );
+                if (existing.status === "COMPLETED") {
+                    return { ...parsePayload(existing.response_snapshot), replayed: true };
                 }
-                const total = Number(countRow?.total || 0);
+                throw new AppError("A request with this Idempotency-Key is still in progress", 409);
+            }
 
-                return {
-                    items: rows.map((row) =>
-                        safePaymentRow(row, authorization.include_recorded_by === true)
-                    ),
-                    pagination: {
-                        page: parsed.page,
-                        page_size: parsed.page_size,
-                        total,
-                        total_pages: Math.ceil(total / parsed.page_size)
-                    }
-                };
-            }, { isolationLevel: "repeatable read" });
+            const result = await work(trx);
+            await trx("idempotency_records").where(where).update({
+                status: "COMPLETED",
+                resource_type: result.resource_type,
+                resource_id: result.resource_id,
+                response_snapshot: JSON.stringify(result.body)
+            });
+            return result.body;
+        });
+    }
+
+    // ---- bills ----------------------------------------------------------------
+
+    async function registerBill(authContext, input) {
+        const actor = await requirePermission(authContext, PERMISSIONS.RECORD);
+        const bill = parse(billSchema, input, "Invalid bill details");
+        return run(() => db.transaction(async (trx) => {
+            await lockWorkOrder(trx, bill.work_order_id);
+            const current = await latestBill(trx, bill.work_order_id);
+            if (current && bill.bill_version <= current.bill_version) {
+                throw new AppError("A newer or equal bill version is already registered", 409);
+            }
+            if (current && current.customer_id !== bill.customer_id) {
+                throw new AppError("Bill customer does not match the work order", 409);
+            }
+            const receivedAt = new Date(now());
+            await trx("inbox_events").insert({
+                inbox_id: createId(),
+                source_service: "manual",
+                source_event_id: createId(),
+                event_type: BILL_EVENT,
+                work_order_id: bill.work_order_id,
+                payload: JSON.stringify({ ...bill, registered_by: actor }),
+                status: "PROCESSED",
+                received_at: receivedAt,
+                processed_at: receivedAt
+            });
+            const totals = await totalsFor(trx, bill.work_order_id);
+            return balanceView({ ...bill, total_amount: bill.total_amount }, totals, null);
+        }), "Bill registration unavailable");
+    }
+
+    // ---- payments -------------------------------------------------------------
+
+    async function recordPayment(authContext, input, idempotencyKey) {
+        const actor = await requirePermission(authContext, PERMISSIONS.RECORD);
+        const request = parse(paymentSchema, input, "Invalid payment details");
+        return run(() => idempotent(actor, "payment.record", idempotencyKey, request, async (trx) => {
+            const lock = await lockWorkOrder(trx, request.work_order_id);
+            if (lock.is_locked) {
+                throw new AppError("Payments for this work order are locked", 423);
+            }
+            const bill = await latestBill(trx, request.work_order_id);
+            if (!bill) {
+                throw new AppError("No issued bill for this work order", 404);
+            }
+            const balance = balanceView(bill, await totalsFor(trx, bill.work_order_id), lock);
+            if (request.amount > balance.outstanding_balance) {
+                throw new AppError("Payment exceeds the outstanding balance", 409);
+            }
+
+            const paymentId = createId();
+            const paidAt = new Date(now());
+            const row = {
+                payment_id: paymentId,
+                work_order_id: bill.work_order_id,
+                bill_id: bill.bill_id,
+                bill_version: bill.bill_version,
+                amount: request.amount,
+                currency: CURRENCY,
+                payment_method: request.payment_method,
+                status: "SUCCEEDED",
+                reference_number: request.reference_number || null,
+                recorded_by: actor,
+                paid_at: paidAt,
+                created_at: paidAt,
+                updated_at: paidAt
+            };
+            await trx("payments").insert(row);
+            await audit(trx, {
+                paymentId, actor, action: "payment.recorded",
+                metadata: { amount: request.amount, payment_method: request.payment_method }
+            });
+            await outbox(trx, {
+                paymentId,
+                type: "payment.succeeded",
+                payload: {
+                    payment_id: paymentId,
+                    work_order_id: bill.work_order_id,
+                    bill_id: bill.bill_id,
+                    bill_version: bill.bill_version,
+                    amount: request.amount,
+                    currency: CURRENCY,
+                    outstanding_balance: balance.outstanding_balance - request.amount
+                }
+            });
+            return {
+                resource_type: "payment",
+                resource_id: paymentId,
+                body: {
+                    ...row,
+                    paid_at: paidAt.toISOString(),
+                    created_at: paidAt.toISOString(),
+                    updated_at: undefined,
+                    outstanding_balance: balance.outstanding_balance - request.amount
+                }
+            };
+        }), "Payment recording unavailable");
+    }
+
+    async function voidPayment(authContext, paymentId, input) {
+        const actor = await requirePermission(authContext, PERMISSIONS.RECORD);
+        const targetId = parse(id, paymentId, "Invalid payment ID");
+        const { reason: voidReason } = parse(voidSchema, input, "A void reason is required");
+        return run(() => db.transaction(async (trx) => {
+            const found = await trx("payments").select("work_order_id")
+                .where({ payment_id: targetId }).first();
+            if (!found) {
+                throw new AppError("Payment not found", 404);
+            }
+            await lockWorkOrder(trx, found.work_order_id);
+            const payment = await trx("payments").select(PAYMENT_FIELDS)
+                .where({ payment_id: targetId }).forUpdate().first();
+            if (payment.status !== "SUCCEEDED") {
+                throw new AppError("Only a succeeded payment can be voided", 409);
+            }
+            const activeRefund = await trx("refunds").select("refund_id")
+                .where({ payment_id: targetId })
+                .whereIn("status", ACTIVE_REFUND_STATUSES)
+                .first();
+            if (activeRefund) {
+                throw new AppError("Payment has refunds; it cannot be voided", 409);
+            }
+            const voidedAt = new Date(now());
+            await trx("payments").where({ payment_id: targetId }).update({
+                status: "VOIDED", voided_by: actor, void_reason: voidReason, voided_at: voidedAt
+            });
+            await audit(trx, {
+                paymentId: targetId, actor, action: "payment.voided", reason: voidReason,
+                metadata: { amount: toAmount(payment.amount) }
+            });
+            await outbox(trx, {
+                paymentId: targetId,
+                type: "payment.voided",
+                payload: {
+                    payment_id: targetId,
+                    work_order_id: payment.work_order_id,
+                    amount: toAmount(payment.amount),
+                    currency: payment.currency
+                }
+            });
+            return {
+                ...payment,
+                amount: toAmount(payment.amount),
+                status: "VOIDED",
+                voided_by: actor,
+                void_reason: voidReason,
+                voided_at: voidedAt
+            };
+        }), "Payment void unavailable");
+    }
+
+    // ---- balances and lists ---------------------------------------------------
+
+    async function getBalance(authContext, workOrderId) {
+        const targetId = parse(id, workOrderId, "Invalid Work Order ID");
+        actorOf(authContext);
+        const canViewAll = await hasPermission(authContext, PERMISSIONS.VIEW_ALL);
+        return run(async () => {
+            const bill = await latestBill(db, targetId);
+            if (!canViewAll) {
+                await requireOwnership(authContext, bill, { work_order_id: targetId });
+            }
+            if (!bill) {
+                throw new AppError("No issued bill for this work order", 404);
+            }
+            const lock = await db("payment_locks").select("is_locked")
+                .where({ work_order_id: targetId }).first();
+            return balanceView(bill, await totalsFor(db, targetId), lock);
+        }, "Payment balance unavailable");
+    }
+
+    async function requireOwnership(authContext, bill, resource) {
+        if (!await hasPermission(authContext, PERMISSIONS.VIEW_OWN, resource)) {
+            throw new AppError("Not authorized for this payment operation", 403);
+        }
+        const customerId = await resolveCustomerId(authContext);
+        // Same answer for "no bill" and "someone else's bill": no existence oracle.
+        if (!bill || !customerId || bill.customer_id !== customerId) {
+            throw new AppError("Not authorized for this payment operation", 403);
+        }
+    }
+
+    async function resolveCustomerId(authContext) {
+        try {
+            return await requestCustomerId(authContext);
         } catch (error) {
             if (error instanceof AppError) {
                 throw error;
             }
-            throw new AppError("Payment history unavailable", 503);
+            throw new AppError("Customer ownership verification unavailable", 503);
         }
     }
 
-    async function getPaymentDetails(authContext, paymentId) {
-        if (typeof paymentId !== "string"
-            || paymentId.trim().length === 0
-            || paymentId.trim().length > 36) {
-            throw new AppError("Invalid Payment ID", 400);
-        }
-        try {
-            return await db.transaction(async (trx) => {
-                const payment = await trx("payments")
-                    .select(
-                        "payment_id",
-                        "work_order_id",
-                        "amount",
-                        "currency",
-                        "payment_method",
-                        "status",
-                        "recorded_by",
-                        "created_at"
-                    )
-                    .where({ payment_id: paymentId.trim() })
-                    .first();
-                if (!payment) {
-                    throw new AppError("Payment not found", 404);
+    function page(query, parsed) {
+        return query
+            .limit(parsed.page_size)
+            .offset((parsed.page - 1) * parsed.page_size);
+    }
+
+    function withAmounts(rows) {
+        return rows.map((row) => ({ ...row, amount: toAmount(row.amount) }));
+    }
+
+    async function listPayments(authContext, query) {
+        await requirePermission(authContext, PERMISSIONS.VIEW_ALL);
+        const parsed = parse(paymentListSchema, query, "Invalid payment query");
+        return run(async () => {
+            const filters = {};
+            for (const key of ["work_order_id", "status", "payment_method"]) {
+                if (parsed[key]) {
+                    filters[key] = parsed[key];
                 }
-                const account = await trx("work_order_payment_accounts")
-                    .select("work_order_id", "currency")
-                    .where({ work_order_id: payment.work_order_id })
-                    .first();
-                if (!account) {
-                    throw new AppError("Payment account not found", 404);
-                }
-                assertHistoryCurrency(
-                    payment.currency,
-                    account.currency,
-                    "Payment details"
-                );
-                const authorization = await authorizeQuery(
-                    authorizePaymentQuery,
-                    authContext,
-                    {
-                        work_order_id: payment.work_order_id,
-                        payment_id: payment.payment_id
-                    },
-                    "Payment history authorization unavailable"
-                );
-                return safePaymentRow(
-                    payment,
-                    authorization.include_recorded_by === true
-                );
-            }, { isolationLevel: "repeatable read" });
-        } catch (error) {
-            if (error instanceof AppError) {
-                throw error;
             }
-            throw new AppError("Payment details unavailable", 503);
-        }
+            const rows = await page(
+                db("payments").select(PAYMENT_FIELDS).where(filters)
+                    .orderBy([{ column: "created_at", order: "desc" }, "payment_id"]),
+                parsed
+            );
+            return { page: parsed.page, page_size: parsed.page_size, items: withAmounts(rows) };
+        }, "Payment history unavailable");
     }
 
-    async function getRefundHistory(authContext, query = {}) {
-        const parsed = parseHistoryQuery(refundHistoryQuerySchema, query);
-        if (!parsed.payment_id && !parsed.work_order_id) {
-            throw new AppError("Payment ID or Work Order ID is required", 400);
-        }
-        const authorization = await authorizeQuery(
-            authorizeRefundQuery,
-            authContext,
-            {
-                payment_id: parsed.payment_id,
-                work_order_id: parsed.work_order_id
-            },
-            "Refund history authorization unavailable"
-        );
-
-        try {
-            return await db.transaction(async (trx) => {
-                let base = trx("refunds")
-                    .join("payments", "refunds.payment_id", "payments.payment_id");
-                let paymentScope;
-                let accountCurrency;
-                if (parsed.payment_id) {
-                    paymentScope = await trx("payments")
-                        .select("payment_id", "work_order_id", "currency")
-                        .where({ payment_id: parsed.payment_id })
-                        .first();
-                    if (!paymentScope) {
-                        throw new AppError("Payment not found", 404);
-                    }
-                    const account = await trx("work_order_payment_accounts")
-                        .select("work_order_id", "currency")
-                        .where({ work_order_id: paymentScope.work_order_id })
-                        .first();
-                    if (!account) {
-                        throw new AppError("Payment account not found", 404);
-                    }
-                    accountCurrency = account.currency;
-                    assertHistoryCurrency(
-                        paymentScope.currency,
-                        accountCurrency,
-                        "Payment"
-                    );
-                    base = base.where({ "refunds.payment_id": parsed.payment_id });
-                }
-                if (parsed.work_order_id) {
-                    const account = await trx("work_order_payment_accounts")
-                        .select("work_order_id", "currency")
-                        .where({ work_order_id: parsed.work_order_id })
-                        .first();
-                    if (!account) {
-                        throw new AppError("Payment account not found", 404);
-                    }
-                    if (paymentScope
-                        && paymentScope.work_order_id !== parsed.work_order_id) {
-                        throw new AppError("Payment not found", 404);
-                    }
-                    accountCurrency = account.currency;
-                    base = base.where({ "payments.work_order_id": parsed.work_order_id });
-                }
-                if (parsed.status) {
-                    base = base.where({ "refunds.status": parsed.status });
-                }
-                if (parsed.from) {
-                    base = base.where("refunds.created_at", ">=", parsed.from);
-                }
-                if (parsed.to) {
-                    base = base.where("refunds.created_at", "<=", parsed.to);
-                }
-
-                const countRow = await base.clone()
-                    .count({ total: "refunds.refund_id" })
-                    .first();
-                const rows = await base.clone()
-                    .select(
-                        ...REFUND_HISTORY_FIELDS,
-                        "payments.currency as payment_currency"
-                    )
-                    .orderBy("refunds.created_at", "desc")
-                    .orderBy("refunds.refund_id", "desc")
-                    .limit(parsed.page_size)
-                    .offset(parsed.offset);
-                for (const row of rows) {
-                    assertHistoryCurrency(
-                        row.currency,
-                        row.payment_currency,
-                        "Refund history"
-                    );
-                    assertHistoryCurrency(
-                        row.payment_currency,
-                        accountCurrency,
-                        "Refund history"
-                    );
-                }
-                const items = rows.map((row) => ({
-                    refund_id: row.refund_id,
-                    payment_id: row.payment_id,
-                    amount: row.amount,
-                    currency: row.currency,
-                    reason: row.reason,
-                    status: row.status,
-                    initiated_by: row.initiated_by,
-                    reviewer_user_id: row.reviewer_user_id,
-                    review_decision: row.review_decision,
-                    reviewed_at: row.reviewed_at,
-                    execution_result: row.execution_result,
-                    created_at: row.created_at,
-                    updated_at: row.updated_at
-                }));
-                const total = Number(countRow?.total || 0);
-                return {
-                    items,
-                    pagination: {
-                        page: parsed.page,
-                        page_size: parsed.page_size,
-                        total,
-                        total_pages: Math.ceil(total / parsed.page_size)
-                    }
-                };
-            }, { isolationLevel: "repeatable read" });
-        } catch (error) {
-            if (error instanceof AppError) {
-                throw error;
+    async function listBalances(authContext) {
+        await requirePermission(authContext, PERMISSIONS.VIEW_ALL);
+        return run(async () => {
+            const bills = await billsFor(db, null);
+            const locks = new Map((await db("payment_locks").select("work_order_id", "is_locked"))
+                .map((row) => [row.work_order_id, row]));
+            const items = [];
+            for (const bill of bills.values()) {
+                items.push(balanceView(bill, await totalsFor(db, bill.work_order_id),
+                    locks.get(bill.work_order_id)));
             }
-            throw new AppError("Refund history unavailable", 503);
-        }
+            items.sort((left, right) => right.outstanding_balance - left.outstanding_balance
+                || left.work_order_id.localeCompare(right.work_order_id));
+            return { items };
+        }, "Payment balances unavailable");
     }
 
-    async function getRefundDetails(authContext, refundId) {
-        if (typeof refundId !== "string"
-            || refundId.trim().length === 0
-            || refundId.trim().length > 36) {
-            throw new AppError("Invalid Refund ID", 400);
+    async function listMyPayments(authContext) {
+        actorOf(authContext);
+        return run(async () => {
+            const customerId = await resolveCustomerId(authContext);
+            if (!customerId) {
+                throw new AppError("Not authorized for this payment operation", 403);
+            }
+            const owned = [...(await billsFor(db, null)).values()]
+                .filter((bill) => bill.customer_id === customerId);
+            if (owned.length === 0) {
+                return { items: [] };
+            }
+            if (!await hasPermission(authContext, PERMISSIONS.VIEW_OWN,
+                { work_order_id: owned[0].work_order_id })) {
+                throw new AppError("Not authorized for this payment operation", 403);
+            }
+            const workOrderIds = owned.map((bill) => bill.work_order_id);
+            const payments = withAmounts(await db("payments").select(OWN_PAYMENT_FIELDS)
+                .whereIn("work_order_id", workOrderIds)
+                .orderBy([{ column: "created_at", order: "desc" }, "payment_id"]));
+            const items = [];
+            for (const bill of owned) {
+                items.push({
+                    ...balanceView(bill, await totalsFor(db, bill.work_order_id), null),
+                    is_locked: undefined,
+                    payments: payments.filter((payment) => payment.work_order_id === bill.work_order_id)
+                });
+            }
+            return { items };
+        }, "Payment history unavailable");
+    }
+
+    // ---- refunds (manual provider, two people) --------------------------------
+
+    async function requestRefund(authContext, input, idempotencyKey) {
+        const actor = await requirePermission(authContext, PERMISSIONS.REFUND);
+        const request = parse(refundSchema, input, "Invalid refund details");
+        return run(() => idempotent(actor, "refund.request", idempotencyKey, request, async (trx) => {
+            const found = await trx("payments").select("work_order_id")
+                .where({ payment_id: request.payment_id }).first();
+            if (!found) {
+                throw new AppError("Payment not found", 404);
+            }
+            await lockWorkOrder(trx, found.work_order_id);
+            const payment = await trx("payments").select("payment_id", "work_order_id", "amount", "status")
+                .where({ payment_id: request.payment_id }).forUpdate().first();
+            if (payment.status !== "SUCCEEDED") {
+                throw new AppError("Only a succeeded payment can be refunded", 409);
+            }
+            const [reserved] = await trx("refunds").sum({ total: "amount" })
+                .where({ payment_id: payment.payment_id })
+                .whereIn("status", ACTIVE_REFUND_STATUSES);
+            const refundable = toAmount(payment.amount) - toAmount(reserved?.total || 0);
+            if (request.amount > refundable) {
+                throw new AppError("Refund exceeds the refundable amount of the payment", 409);
+            }
+            const refundId = createId();
+            const requestedAt = new Date(now());
+            const row = {
+                refund_id: refundId,
+                payment_id: payment.payment_id,
+                work_order_id: payment.work_order_id,
+                amount: request.amount,
+                currency: CURRENCY,
+                status: "REQUESTED",
+                requested_by: actor,
+                reason: request.reason,
+                requested_at: requestedAt,
+                created_at: requestedAt,
+                updated_at: requestedAt
+            };
+            await trx("refunds").insert(row);
+            await audit(trx, {
+                refundId, actor, action: "refund.requested", reason: request.reason,
+                metadata: { amount: request.amount, payment_id: payment.payment_id }
+            });
+            return {
+                resource_type: "refund",
+                resource_id: refundId,
+                body: {
+                    ...row,
+                    requested_at: requestedAt.toISOString(),
+                    created_at: undefined,
+                    updated_at: undefined
+                }
+            };
+        }), "Refund request unavailable");
+    }
+
+    async function loadRefundForUpdate(trx, refundId) {
+        const found = await trx("refunds").select("work_order_id")
+            .where({ refund_id: refundId }).first();
+        if (!found) {
+            throw new AppError("Refund not found", 404);
         }
-        try {
-            return await db.transaction(async (trx) => {
-                const refund = await trx("refunds")
-                    .join("payments", "refunds.payment_id", "payments.payment_id")
-                    .select(
-                        ...REFUND_HISTORY_FIELDS,
-                        "payments.work_order_id as work_order_id",
-                        "payments.currency as payment_currency"
-                    )
-                    .where({ "refunds.refund_id": refundId.trim() })
-                    .first();
-                if (!refund) {
-                    throw new AppError("Refund not found", 404);
-                }
-                const account = await trx("work_order_payment_accounts")
-                    .select("currency")
-                    .where({ work_order_id: refund.work_order_id })
-                    .first();
-                if (!account) {
-                    throw new AppError("Payment account not found", 404);
-                }
-                assertHistoryCurrency(
-                    refund.payment_currency,
-                    account.currency,
-                    "Payment"
-                );
-                assertHistoryCurrency(
-                    refund.currency,
-                    refund.payment_currency,
-                    "Refund details"
-                );
-                await authorizeQuery(
-                    authorizeRefundQuery,
-                    authContext,
-                    {
-                        refund_id: refund.refund_id,
-                        payment_id: refund.payment_id,
-                        work_order_id: refund.work_order_id
-                    },
-                    "Refund history authorization unavailable"
-                );
-                return {
-                    refund_id: refund.refund_id,
+        await lockWorkOrder(trx, found.work_order_id);
+        const refund = await trx("refunds").select(REFUND_FIELDS)
+            .where({ refund_id: refundId }).forUpdate().first();
+        return { ...refund, amount: toAmount(refund.amount) };
+    }
+
+    async function approveRefund(authContext, refundId) {
+        const actor = await requirePermission(authContext, PERMISSIONS.REFUND);
+        const targetId = parse(id, refundId, "Invalid refund ID");
+        return run(() => db.transaction(async (trx) => {
+            const refund = await loadRefundForUpdate(trx, targetId);
+            if (refund.status !== "REQUESTED") {
+                throw new AppError("Only a requested refund can be approved", 409);
+            }
+            if (refund.requested_by === actor) {
+                throw new AppError("A refund must be approved by someone other than the requester", 403);
+            }
+            const approvedAt = new Date(now());
+            await trx("refunds").where({ refund_id: targetId }).update({
+                status: "APPROVED", approved_by: actor, approved_at: approvedAt
+            });
+            await audit(trx, { refundId: targetId, actor, action: "refund.approved" });
+            return { ...refund, status: "APPROVED", approved_by: actor, approved_at: approvedAt };
+        }), "Refund approval unavailable");
+    }
+
+    async function rejectRefund(authContext, refundId, input) {
+        const actor = await requirePermission(authContext, PERMISSIONS.REFUND);
+        const targetId = parse(id, refundId, "Invalid refund ID");
+        const { reason: rejectionReason } = parse(rejectSchema, input, "A rejection reason is required");
+        return run(() => db.transaction(async (trx) => {
+            const refund = await loadRefundForUpdate(trx, targetId);
+            if (!["REQUESTED", "APPROVED"].includes(refund.status)) {
+                throw new AppError("Only a requested or approved refund can be rejected", 409);
+            }
+            const rejectedAt = new Date(now());
+            await trx("refunds").where({ refund_id: targetId }).update({
+                status: "REJECTED", rejection_reason: rejectionReason, rejected_at: rejectedAt
+            });
+            await audit(trx, {
+                refundId: targetId, actor, action: "refund.rejected", reason: rejectionReason,
+                metadata: { from_status: refund.status }
+            });
+            return {
+                ...refund, status: "REJECTED", rejection_reason: rejectionReason, rejected_at: rejectedAt
+            };
+        }), "Refund rejection unavailable");
+    }
+
+    // Manual provider: the executor confirms the money was returned outside the
+    // system. The executor must not be the requester.
+    async function executeRefund(authContext, refundId) {
+        const actor = await requirePermission(authContext, PERMISSIONS.REFUND);
+        const targetId = parse(id, refundId, "Invalid refund ID");
+        return run(() => db.transaction(async (trx) => {
+            const refund = await loadRefundForUpdate(trx, targetId);
+            if (refund.status !== "APPROVED") {
+                throw new AppError("Only an approved refund can be executed", 409);
+            }
+            if (refund.requested_by === actor) {
+                throw new AppError("A refund must be executed by someone other than the requester", 403);
+            }
+            const completedAt = new Date(now());
+            await trx("refunds").where({ refund_id: targetId }).update({
+                status: "COMPLETED", processed_at: completedAt, completed_at: completedAt
+            });
+            await audit(trx, {
+                refundId: targetId, actor, action: "refund.completed",
+                metadata: { amount: refund.amount, provider: "manual" }
+            });
+            await outbox(trx, {
+                refundId: targetId,
+                type: "refund.completed",
+                payload: {
+                    refund_id: targetId,
                     payment_id: refund.payment_id,
+                    work_order_id: refund.work_order_id,
                     amount: refund.amount,
-                    currency: refund.currency,
-                    reason: refund.reason,
-                    status: refund.status,
-                    initiated_by: refund.initiated_by,
-                    reviewer_user_id: refund.reviewer_user_id,
-                    review_decision: refund.review_decision,
-                    reviewed_at: refund.reviewed_at,
-                    execution_result: refund.execution_result,
-                    created_at: refund.created_at,
-                    updated_at: refund.updated_at
-                };
-            }, { isolationLevel: "repeatable read" });
-        } catch (error) {
-            if (error instanceof AppError) {
-                throw error;
+                    currency: refund.currency
+                }
+            });
+            return {
+                ...refund, status: "COMPLETED", processed_at: completedAt, completed_at: completedAt
+            };
+        }), "Refund execution unavailable");
+    }
+
+    async function listRefunds(authContext, query) {
+        await requirePermission(authContext, PERMISSIONS.VIEW_ALL);
+        const parsed = parse(refundListSchema, query, "Invalid refund query");
+        return run(async () => {
+            const filters = {};
+            for (const key of ["work_order_id", "payment_id", "status"]) {
+                if (parsed[key]) {
+                    filters[key] = parsed[key];
+                }
             }
-            throw new AppError("Refund details unavailable", 503);
-        }
-    }
-
-    async function getRefundActor(authContext) {
-        if (typeof authorizeRefundActor !== "function") {
-            throw new AppError("Refund authorization unavailable", 503);
-        }
-
-        let actorUserId;
-        try {
-            actorUserId = await authorizeRefundActor(authContext, "can_refund");
-        } catch (error) {
-            throw trustedDependencyError(error, "Refund authorization unavailable");
-        }
-        if (typeof actorUserId !== "string"
-            || actorUserId.trim().length === 0
-            || actorUserId.trim().length > 36) {
-            throw new AppError("Refund operation is not authorized", 403);
-        }
-        return actorUserId.trim();
-    }
-
-    async function verifyAccount(trx, account) {
-        let approvedAccount;
-        try {
-            approvedAccount = await verifyApprovedPaymentAccount(trx, account);
-        } catch (error) {
-            throw trustedDependencyError(
-                error,
-                "Approved quotation verification unavailable"
+            const rows = await page(
+                db("refunds").select(REFUND_FIELDS).where(filters)
+                    .orderBy([{ column: "requested_at", order: "desc" }, "refund_id"]),
+                parsed
             );
-        }
-        if (approvedAccount !== true) {
-            throw new AppError(
-                "Payment account has no verified approved quotation",
-                409
-            );
-        }
-    }
-
-    async function createRefundRequest(authContext, input) {
-        const actorUserId = await getRefundActor(authContext);
-        const parsed = refundRequestSchema.safeParse(input);
-        if (!parsed.success) {
-            throw new AppError("Invalid refund request", 400);
-        }
-        const requestedAmount = toMinorUnits(parsed.data.amount, "refund amount");
-        if (requestedAmount <= 0n) {
-            throw new AppError("Refund amount must be greater than zero", 400);
-        }
-
-        try {
-            return await db.transaction(async (trx) => {
-                const initialPayment = await trx("payments")
-                    .select("payment_id", "work_order_id")
-                    .where({ payment_id: parsed.data.payment_id })
-                    .first();
-                if (!initialPayment) {
-                    throw new AppError("Payment not found", 404);
-                }
-
-                const account = await trx("work_order_payment_accounts")
-                    .select("work_order_id", "amount_due", "currency")
-                    .where({ work_order_id: initialPayment.work_order_id })
-                    .forUpdate()
-                    .first();
-                if (!account) {
-                    throw new AppError("Payment account not found", 409);
-                }
-                await verifyAccount(trx, account);
-
-                const payment = await trx("payments")
-                    .select("payment_id", "work_order_id", "amount", "currency", "status")
-                    .where({ payment_id: parsed.data.payment_id })
-                    .forUpdate()
-                    .first();
-                if (!payment || payment.work_order_id !== account.work_order_id) {
-                    throw new AppError("Payment not found", 404);
-                }
-                if (payment.status !== "COMPLETED") {
-                    throw new AppError("Payment is not eligible for a refund", 409);
-                }
-                assertCurrencyMatches(payment.currency, account.currency);
-
-                const paymentAmount = storedAmountToMinorUnits(payment.amount);
-                const reservedRefunds = await trx("refunds")
-                    .select("amount", "currency")
-                    .where({ payment_id: payment.payment_id })
-                    .whereIn("status", REFUND_RESERVED_STATUSES);
-                let reservedTotal = 0n;
-                for (const refund of reservedRefunds) {
-                    assertCurrencyMatches(refund.currency, payment.currency);
-                    reservedTotal += storedAmountToMinorUnits(refund.amount);
-                }
-                if (reservedTotal > paymentAmount) {
-                    throw new AppError("Refund reservations are inconsistent", 409);
-                }
-                if (requestedAmount > paymentAmount - reservedTotal) {
-                    throw new AppError("Refund exceeds the refundable amount", 409);
-                }
-
-                const refundId = createId();
-                const occurredAt = new Date(now());
-                const refund = {
-                    refund_id: refundId,
-                    payment_id: payment.payment_id,
-                    amount: fromMinorUnits(requestedAmount),
-                    currency: payment.currency,
-                    status: "REQUESTED",
-                    reason: parsed.data.reason,
-                    initiated_by: actorUserId,
-                    reviewer_user_id: null,
-                    review_decision: null,
-                    reviewed_at: null,
-                    created_at: occurredAt,
-                    updated_at: occurredAt
-                };
-                await trx("refunds").insert(refund);
-                await recordAudit(trx, authContext, {
-                    event_key: `refund.requested:${refundId}`,
-                    actor_user_id: actorUserId,
-                    action: "refund.requested",
-                    target_entity_type: "REFUND",
-                    target_entity_id: refundId,
-                    outcome: "SUCCESS",
-                    metadata: {
-                        amount: refund.amount,
-                        currency: refund.currency,
-                        payment_id: refund.payment_id,
-                        to_status: refund.status
-                    }
-                });
-
-                return { ...refund };
-            });
-        } catch (error) {
-            if (error instanceof AppError) {
-                throw error;
-            }
-            throw new AppError("Refund request unavailable", 503);
-        }
-    }
-
-    async function decideRefundRequest(authContext, input) {
-        const reviewerUserId = await getRefundActor(authContext);
-        const parsed = refundDecisionSchema.safeParse(input);
-        if (!parsed.success) {
-            throw new AppError("Invalid refund decision", 400);
-        }
-
-        try {
-            return await db.transaction(async (trx) => {
-                const initialRefund = await trx("refunds")
-                    .select("refund_id", "payment_id")
-                    .where({ refund_id: parsed.data.refund_id })
-                    .first();
-                if (!initialRefund) {
-                    throw new AppError("Refund request not found", 404);
-                }
-                const initialPayment = await trx("payments")
-                    .select("payment_id", "work_order_id")
-                    .where({ payment_id: initialRefund.payment_id })
-                    .first();
-                if (!initialPayment) {
-                    throw new AppError("Payment not found", 409);
-                }
-
-                const account = await trx("work_order_payment_accounts")
-                    .select("work_order_id", "amount_due", "currency")
-                    .where({ work_order_id: initialPayment.work_order_id })
-                    .forUpdate()
-                    .first();
-                if (!account) {
-                    throw new AppError("Payment account not found", 409);
-                }
-                await verifyAccount(trx, account);
-
-                const payment = await trx("payments")
-                    .select("payment_id", "work_order_id")
-                    .where({ payment_id: initialRefund.payment_id })
-                    .forUpdate()
-                    .first();
-                const refund = await trx("refunds")
-                    .select(
-                        "refund_id",
-                        "payment_id",
-                        "status",
-                        "initiated_by"
-                    )
-                    .where({ refund_id: parsed.data.refund_id })
-                    .forUpdate()
-                    .first();
-                if (!payment
-                    || payment.work_order_id !== account.work_order_id
-                    || !refund
-                    || refund.payment_id !== payment.payment_id) {
-                    throw new AppError("Refund request not found", 404);
-                }
-                if (refund.initiated_by === reviewerUserId) {
-                    throw new AppError(
-                        "Refund initiator cannot review their own request",
-                        403
-                    );
-                }
-                if (refund.status !== "REQUESTED") {
-                    throw new AppError("Refund request is not reviewable", 409);
-                }
-
-                const reviewedAt = new Date(now());
-                const updatedRows = await trx("refunds")
-                    .where({
-                        refund_id: refund.refund_id,
-                        status: "REQUESTED"
-                    })
-                    .update({
-                        status: parsed.data.decision,
-                        reviewer_user_id: reviewerUserId,
-                        review_decision: parsed.data.decision,
-                        reviewed_at: reviewedAt,
-                        updated_at: reviewedAt
-                    });
-                if (updatedRows !== 1) {
-                    throw new AppError("Refund request is not reviewable", 409);
-                }
-                await recordAudit(trx, authContext, {
-                    event_key: `refund.${parsed.data.decision.toLowerCase()}:${refund.refund_id}`,
-                    actor_user_id: reviewerUserId,
-                    action: `refund.${parsed.data.decision.toLowerCase()}`,
-                    target_entity_type: "REFUND",
-                    target_entity_id: refund.refund_id,
-                    outcome: "SUCCESS",
-                    metadata: {
-                        from_status: "REQUESTED",
-                        to_status: parsed.data.decision
-                    }
-                });
-
-                return {
-                    refund_id: refund.refund_id,
-                    status: parsed.data.decision,
-                    initiated_by: refund.initiated_by,
-                    reviewer_user_id: reviewerUserId,
-                    review_decision: parsed.data.decision,
-                    reviewed_at: reviewedAt
-                };
-            });
-        } catch (error) {
-            if (error instanceof AppError) {
-                throw error;
-            }
-            throw new AppError("Refund decision unavailable", 503);
-        }
-    }
-
-    async function executeRefund(authContext, input) {
-        const actorUserId = await getRefundActor(authContext);
-        const parsed = refundExecutionSchema.safeParse(input);
-        if (!parsed.success) {
-            throw new AppError("Invalid refund execution request", 400);
-        }
-        if (!refundProviderConfigured) {
-            throw new AppError("Refund provider is not configured", 503);
-        }
-
-        let execution;
-        try {
-            execution = await db.transaction(async (trx) => {
-                const initialRefund = await trx("refunds")
-                    .select("refund_id", "payment_id")
-                    .where({ refund_id: parsed.data.refund_id })
-                    .first();
-                if (!initialRefund) {
-                    throw new AppError("Refund request not found", 404);
-                }
-                const initialPayment = await trx("payments")
-                    .select("payment_id", "work_order_id")
-                    .where({ payment_id: initialRefund.payment_id })
-                    .first();
-                if (!initialPayment) {
-                    throw new AppError("Payment not found", 409);
-                }
-
-                const account = await trx("work_order_payment_accounts")
-                    .select("work_order_id", "amount_due", "currency")
-                    .where({ work_order_id: initialPayment.work_order_id })
-                    .forUpdate()
-                    .first();
-                if (!account) {
-                    throw new AppError("Payment account not found", 409);
-                }
-                await verifyAccount(trx, account);
-
-                const payment = await trx("payments")
-                    .select("payment_id", "work_order_id", "amount", "currency", "status")
-                    .where({ payment_id: initialRefund.payment_id })
-                    .forUpdate()
-                    .first();
-                const refund = await trx("refunds")
-                    .select(
-                        "refund_id",
-                        "payment_id",
-                        "amount",
-                        "currency",
-                        "status",
-                        "initiated_by",
-                        "reviewer_user_id",
-                        "review_decision",
-                        "execution_started_at",
-                        "execution_attempts",
-                        "execution_lease_token",
-                        "execution_lease_until",
-                        "execution_result",
-                        "idempotency_key"
-                    )
-                    .where({ refund_id: parsed.data.refund_id })
-                    .forUpdate()
-                    .first();
-                if (!payment
-                    || payment.work_order_id !== account.work_order_id
-                    || payment.status !== "COMPLETED"
-                    || !refund
-                    || refund.payment_id !== payment.payment_id) {
-                    throw new AppError("Refund request not found", 404);
-                }
-                if (!refund.initiated_by
-                    || !refund.reviewer_user_id
-                    || refund.reviewer_user_id === refund.initiated_by
-                    || refund.review_decision !== "APPROVED") {
-                    throw new AppError("Refund has no valid approval", 409);
-                }
-                assertCurrencyMatches(payment.currency, account.currency);
-                assertCurrencyMatches(refund.currency, payment.currency);
-                const paymentAmount = storedAmountToMinorUnits(payment.amount);
-                const refundAmount = storedAmountToMinorUnits(refund.amount);
-                if (refundAmount > paymentAmount) {
-                    throw new AppError("Refund reservations are inconsistent", 409);
-                }
-
-                const currentTime = now();
-                const currentTimestamp = new Date(currentTime);
-                const allowedRetry = refund.status === "FAILED"
-                    && refund.execution_result === "FAILED";
-                if (refund.status !== "APPROVED"
-                    && refund.status !== "PROCESSING"
-                    && !allowedRetry) {
-                    throw new AppError("Refund request is not executable", 409);
-                }
-                if (refund.status === "PROCESSING" && refund.execution_lease_until) {
-                    const leaseEnd = new Date(refund.execution_lease_until).getTime();
-                    if (!Number.isFinite(leaseEnd)) {
-                        throw new AppError("Refund execution state is inconsistent", 409);
-                    }
-                    if (leaseEnd > currentTimestamp.getTime()) {
-                        throw new AppError("Refund execution is already in progress", 409);
-                    }
-                }
-
-                const reservations = await trx("refunds")
-                    .select("refund_id", "amount", "currency", "status")
-                    .where({ payment_id: payment.payment_id });
-                let reservedOther = 0n;
-                for (const reserved of reservations) {
-                    if (reserved.refund_id === refund.refund_id
-                        || !REFUND_RESERVED_STATUSES.includes(reserved.status)) {
-                        continue;
-                    }
-                    assertCurrencyMatches(reserved.currency, payment.currency);
-                    reservedOther += storedAmountToMinorUnits(reserved.amount);
-                }
-                if (reservedOther + refundAmount > paymentAmount) {
-                    throw new AppError("Refund exceeds the refundable amount", 409);
-                }
-
-                const leaseToken = createId();
-                const idempotencyKey = refund.idempotency_key || `refund:${refund.refund_id}`;
-                const leaseUntil = new Date(currentTimestamp.getTime() + 60_000);
-                const executionAttempt = (refund.execution_attempts || 0) + 1;
-                const isRetry = executionAttempt > 1;
-                const updatedRows = await trx("refunds")
-                    .where({ refund_id: refund.refund_id })
-                    .where({ status: refund.status })
-                    .update({
-                        status: "PROCESSING",
-                        execution_started_at: refund.execution_started_at || currentTimestamp,
-                        executing_by: actorUserId,
-                        execution_attempts: executionAttempt,
-                        execution_lease_token: leaseToken,
-                        execution_lease_until: leaseUntil,
-                        execution_result: "UNKNOWN",
-                        idempotency_key: idempotencyKey,
-                        updated_at: currentTimestamp
-                    });
-                if (updatedRows !== 1) {
-                    throw new AppError("Refund execution state changed; retry", 409);
-                }
-                await recordAudit(trx, authContext, {
-                    event_key: `refund.execution.started:${refund.refund_id}:${refund.execution_attempts + 1}`,
-                    actor_user_id: actorUserId,
-                    action: "refund.execution.started",
-                    target_entity_type: "REFUND",
-                    target_entity_id: refund.refund_id,
-                    outcome: "SUCCESS",
-                    metadata: {
-                        execution_attempt: executionAttempt,
-                        from_status: refund.status,
-                        to_status: "PROCESSING"
-                    }
-                });
-                if (isRetry) {
-                    await recordAudit(trx, authContext, {
-                        event_key: `refund.execution.retry_attempted:${refund.refund_id}:${refund.execution_attempts + 1}`,
-                        actor_user_id: actorUserId,
-                        action: "refund.execution.retry_attempted",
-                        target_entity_type: "REFUND",
-                        target_entity_id: refund.refund_id,
-                        outcome: "SUCCESS",
-                        metadata: {
-                            execution_attempt: executionAttempt,
-                            from_status: refund.status,
-                            to_status: "PROCESSING"
-                        }
-                    });
-                }
-
-                return {
-                    refund_id: refund.refund_id,
-                    payment_id: payment.payment_id,
-                    amount: fromMinorUnits(refundAmount),
-                    currency: refund.currency,
-                    idempotency_key: idempotencyKey,
-                    lease_token: leaseToken,
-                    executing_by: actorUserId
-                };
-            });
-        } catch (error) {
-            if (error instanceof AppError) {
-                throw error;
-            }
-            throw new AppError("Refund execution could not be started", 503);
-        }
-
-        let providerResult;
-        try {
-            providerResult = await refundProvider.executeRefund({
-                refund_id: execution.refund_id,
-                payment_id: execution.payment_id,
-                amount: execution.amount,
-                currency: execution.currency,
-                idempotency_key: execution.idempotency_key
-            });
-        } catch {
-            providerResult = { outcome: "unknown" };
-        }
-
-        const validExternalReference = providerResult?.external_reference_id === undefined
-            || (typeof providerResult.external_reference_id === "string"
-                && providerResult.external_reference_id.trim().length > 0
-                && providerResult.external_reference_id.length <= 191);
-        const outcome = validExternalReference
-            && ["succeeded", "failed", "unknown"].includes(providerResult?.outcome)
-            ? providerResult.outcome
-            : "unknown";
-        const externalReferenceId = validExternalReference
-            ? providerResult.external_reference_id || null
-            : null;
-
-        try {
-            return await db.transaction(async (trx) => {
-                const currentRefund = await trx("refunds")
-                    .select(
-                        "refund_id",
-                        "payment_id",
-                        "status",
-                        "execution_lease_token",
-                        "executing_by"
-                    )
-                    .where({ refund_id: execution.refund_id })
-                    .first();
-                if (!currentRefund) {
-                    throw new AppError("Refund request not found", 404);
-                }
-                const currentPayment = await trx("payments")
-                    .select("payment_id", "work_order_id")
-                    .where({ payment_id: currentRefund.payment_id })
-                    .first();
-                if (!currentPayment) {
-                    throw new AppError("Payment not found", 409);
-                }
-                const account = await trx("work_order_payment_accounts")
-                    .select("work_order_id")
-                    .where({ work_order_id: currentPayment.work_order_id })
-                    .forUpdate()
-                    .first();
-                if (!account) {
-                    throw new AppError("Payment account not found", 409);
-                }
-                await trx("payments")
-                    .select("payment_id")
-                    .where({ payment_id: currentPayment.payment_id })
-                    .forUpdate()
-                    .first();
-                const lockedRefund = await trx("refunds")
-                    .select(
-                        "refund_id",
-                        "payment_id",
-                        "status",
-                        "execution_lease_token",
-                        "executing_by",
-                        "external_reference_id"
-                    )
-                    .where({ refund_id: execution.refund_id })
-                    .forUpdate()
-                    .first();
-                if (lockedRefund.execution_lease_token !== execution.lease_token) {
-                    return {
-                        refund_id: execution.refund_id,
-                        status: lockedRefund.status,
-                        execution_result: lockedRefund.status === "COMPLETED"
-                            ? "SUCCEEDED"
-                            : "UNKNOWN",
-                        external_reference_id: lockedRefund.external_reference_id || null,
-                        idempotency_key: execution.idempotency_key
-                    };
-                }
-
-                const status = outcome === "succeeded"
-                    ? "COMPLETED"
-                    : outcome === "failed"
-                        ? "FAILED"
-                        : "PROCESSING";
-                const executionResult = outcome.toUpperCase();
-                const updateFields = {
-                    status,
-                    execution_result: executionResult,
-                    execution_lease_token: null,
-                    execution_lease_until: null,
-                    updated_at: new Date(now())
-                };
-                if (externalReferenceId) {
-                    updateFields.external_reference_id = externalReferenceId;
-                }
-                const updatedRows = await trx("refunds")
-                    .where({
-                        refund_id: execution.refund_id,
-                        status: "PROCESSING",
-                        execution_lease_token: execution.lease_token
-                    })
-                    .update(updateFields);
-                if (updatedRows !== 1) {
-                    throw new AppError("Refund execution state changed; reconcile", 409);
-                }
-                const action = outcome === "succeeded"
-                    ? "refund.execution.completed"
-                    : outcome === "failed"
-                        ? "refund.execution.failed"
-                        : "refund.execution.unknown";
-                await recordAudit(trx, authContext, {
-                    event_key: `${action}:${execution.refund_id}:${execution.idempotency_key}`,
-                    actor_user_id: execution.executing_by,
-                    action,
-                    target_entity_type: "REFUND",
-                    target_entity_id: execution.refund_id,
-                    outcome: outcome === "succeeded"
-                        ? "SUCCESS"
-                        : outcome === "failed"
-                            ? "FAILURE"
-                            : "UNKNOWN",
-                    metadata: {
-                        execution_result: executionResult,
-                        to_status: status
-                    }
-                });
-
-                return {
-                    refund_id: execution.refund_id,
-                    status,
-                    execution_result: executionResult,
-                    executing_by: lockedRefund.executing_by,
-                    external_reference_id: externalReferenceId
-                        || lockedRefund.external_reference_id
-                        || null,
-                    idempotency_key: execution.idempotency_key
-                };
-            });
-        } catch (error) {
-            if (error instanceof AppError) {
-                throw error;
-            }
-            throw new AppError(
-                "Refund provider outcome could not be persisted; reconciliation is required",
-                503
-            );
-        }
+            return { page: parsed.page, page_size: parsed.page_size, items: withAmounts(rows) };
+        }, "Refund history unavailable");
     }
 
     return {
+        registerBill,
         recordPayment,
+        voidPayment,
         getBalance,
-        getPaymentHistory,
-        getPaymentDetails,
-        createRefundRequest,
-        decideRefundRequest,
+        listPayments,
+        listBalances,
+        listMyPayments,
+        requestRefund,
+        approveRefund,
+        rejectRefund,
         executeRefund,
-        getRefundHistory,
-        getRefundDetails
+        listRefunds
     };
 }
 
 module.exports = {
-    createPaymentService,
-    fromMinorUnits,
-    toMinorUnits
+    PAYMENT_METHODS,
+    createPaymentService
 };

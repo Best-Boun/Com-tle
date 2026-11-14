@@ -89,23 +89,6 @@ function customerIdentityResponse(userId, customerId, customerType = "REGISTERED
     };
 }
 
-function paymentAccountDb(customerId = "customer-verified") {
-    return (table) => ({
-        select() {
-            return this;
-        },
-        where() {
-            return this;
-        },
-        async first() {
-            if (table === "payments") {
-                return { work_order_id: "work-order-1" };
-            }
-            return { customer_id: customerId };
-        }
-    });
-}
-
 function createAdapter(options = {}) {
     return createUserAuthorizationAdapter({
         userJwtVerifier: createVerifier(),
@@ -345,63 +328,14 @@ test("adapter fails closed on timeout, network failure, malformed response, and 
 
     const refundDenied = createAdapter({
         fetchImplementation: async () =>
-            permissionResponse("user-verified", "can_refund", false)
+            permissionResponse("user-verified", "payment.refund", false)
     });
     await assert.rejects(
         refundDenied.authorizeRefundActor(
             refundDenied.authenticateToken(createUserToken()),
-            "can_refund"
+            "payment.refund"
         ),
         (error) => error.statusCode === 403
-    );
-});
-
-test("payment history requires both permission and trusted local ownership verification", async () => {
-    const deniedWithoutOwnershipAdapter = createAdapter({
-        fetchImplementation: async () =>
-            permissionResponse("user-verified", "payment.view_own")
-    });
-    assert.equal(await deniedWithoutOwnershipAdapter.authorizePaymentQuery(
-        deniedWithoutOwnershipAdapter.authenticateToken(createUserToken()),
-        { work_order_id: "work-order-1" }
-    ), false);
-
-    const paymentDb = (table) => ({
-        select() {
-            return this;
-        },
-        where() {
-            return this;
-        },
-        async first() {
-            if (table === "payments") {
-                return { work_order_id: "work-order-1" };
-            }
-            return { customer_id: "customer-verified" };
-        }
-    });
-    const ownershipAdapter = createAdapter({
-        paymentDb,
-        fetchImplementation: async (url) => url.endsWith("/internal/permissions/check")
-            ? permissionResponse("user-verified", "payment.view_own")
-            : customerIdentityResponse("user-verified", "customer-verified")
-    });
-    assert.deepEqual(await ownershipAdapter.authorizePaymentQuery(
-        ownershipAdapter.authenticateToken(createUserToken()),
-        { payment_id: "payment-1" }
-    ), {
-        allowed: true,
-        include_recorded_by: false
-    });
-    await assert.rejects(
-        ownershipAdapter.authorizePaymentQuery(
-            ownershipAdapter.authenticateToken(createUserToken()),
-            {
-                work_order_id: "work-order-1",
-                customer_id: "client-supplied-customer"
-            }
-        ),
-        (error) => error.statusCode === 400
     );
 });
 
@@ -409,61 +343,39 @@ test("customer resolution sends the verified subject and original User JWT separ
     let identityRequest;
     const userToken = createUserToken();
     const adapter = createAdapter({
-        paymentDb: paymentAccountDb(),
         internalServiceTokenIssuer: {
             createToken: async () => "fresh-internal-token"
         },
         fetchImplementation: async (url, options) => {
-            if (url.endsWith("/internal/permissions/check")) {
-                return permissionResponse("user-verified", "payment.view_own");
-            }
             identityRequest = { url, options };
             return customerIdentityResponse("user-verified", "customer-verified");
         }
     });
-    const result = await adapter.authorizePaymentQuery(
-        adapter.authenticateToken(userToken),
-        { work_order_id: "work-order-1" }
+    assert.equal(
+        await adapter.requestCustomerId(adapter.authenticateToken(userToken)),
+        "customer-verified"
     );
-
-    assert.deepEqual(result, { allowed: true, include_recorded_by: false });
     assert.equal(
         identityRequest.url,
         "https://user-service.internal/internal/customers/resolve"
     );
-    assert.equal(
-        identityRequest.options.headers.authorization,
-        "Bearer fresh-internal-token"
-    );
+    assert.equal(identityRequest.options.headers.authorization, "Bearer fresh-internal-token");
     assert.equal(identityRequest.options.headers["x-user-access-token"], userToken);
-    assert.deepEqual(JSON.parse(identityRequest.options.body), {
-        user_id: "user-verified"
-    });
+    assert.deepEqual(JSON.parse(identityRequest.options.body), { user_id: "user-verified" });
     assert.equal(identityRequest.options.redirect, "error");
 });
 
-test("identity resolver rejects response mismatches and never accepts client identity fields", async () => {
-    const userToken = createUserToken();
-    const authContext = createAdapter().authenticateToken(userToken);
+test("customer resolution requires a context created by authenticateToken", async () => {
+    const adapter = createAdapter({
+        fetchImplementation: async () => customerIdentityResponse("user-verified", "customer-verified")
+    });
+    await assert.rejects(
+        adapter.requestCustomerId({ userId: "user-verified" }),
+        (error) => error.statusCode === 401
+    );
+});
 
-    for (const resource of [
-        { work_order_id: "work-order-1", user_id: "attacker-user" },
-        { work_order_id: "work-order-1", customer_id: "attacker-customer" }
-    ]) {
-        const adapter = createAdapter({
-            fetchImplementation: async () =>
-                permissionResponse("user-verified", "payment.view_own")
-        });
-        await assert.rejects(
-            adapter.authorizePaymentQuery(
-                adapter.authenticateToken(userToken),
-                resource
-            ),
-            (error) => error.statusCode === 400
-        );
-    }
-    assert.equal(authContext.userId, "user-verified");
-
+test("identity resolver rejects response mismatches", async () => {
     for (const identityResponse of [
         customerIdentityResponse("another-user", "customer-verified"),
         customerIdentityResponse("user-verified", "customer-verified", "GUEST"),
@@ -484,133 +396,72 @@ test("identity resolver rejects response mismatches and never accepts client ide
             }
         }
     ]) {
-        const adapter = createAdapter({
-            paymentDb: paymentAccountDb(),
-            fetchImplementation: async (url) => url.endsWith("/internal/permissions/check")
-                ? permissionResponse("user-verified", "payment.view_own")
-                : identityResponse
-        });
+        const adapter = createAdapter({ fetchImplementation: async () => identityResponse });
         await assert.rejects(
-            adapter.authorizePaymentQuery(
-                adapter.authenticateToken(userToken),
-                { work_order_id: "work-order-1" }
-            ),
+            adapter.requestCustomerId(adapter.authenticateToken(createUserToken())),
             (error) => error.statusCode === 503
         );
     }
 });
 
-test("identity lookup denies User-Service 401, 403, and 404 and fails closed on 503", async () => {
+test("identity lookup returns null on User-Service 401, 403, and 404 and fails closed on 503", async () => {
+    const reply = (status) => ({
+        status,
+        ok: false,
+        async json() {
+            return { success: false, message: "no" };
+        }
+    });
     for (const status of [401, 403, 404]) {
-        const adapter = createAdapter({
-            paymentDb: paymentAccountDb(),
-            fetchImplementation: async (url) => url.endsWith("/internal/permissions/check")
-                ? permissionResponse("user-verified", "payment.view_own")
-                : {
-                    status,
-                    ok: false,
-                    async json() {
-                        return { success: false, message: "denied" };
-                    }
-                }
-        });
-        assert.equal(await adapter.authorizePaymentQuery(
-            adapter.authenticateToken(createUserToken()),
-            { work_order_id: "work-order-1" }
-        ), false);
+        const adapter = createAdapter({ fetchImplementation: async () => reply(status) });
+        assert.equal(
+            await adapter.requestCustomerId(adapter.authenticateToken(createUserToken())),
+            null
+        );
     }
-
-    const unavailable = createAdapter({
-        paymentDb: paymentAccountDb(),
-        fetchImplementation: async (url) => url.endsWith("/internal/permissions/check")
-            ? permissionResponse("user-verified", "payment.view_own")
-            : {
-                status: 503,
-                ok: false,
-                async json() {
-                    return { success: false, message: "unavailable" };
-                }
-            }
-    });
+    const unavailable = createAdapter({ fetchImplementation: async () => reply(503) });
     await assert.rejects(
-        unavailable.authorizePaymentQuery(
-            unavailable.authenticateToken(createUserToken()),
-            { work_order_id: "work-order-1" }
-        ),
+        unavailable.requestCustomerId(unavailable.authenticateToken(createUserToken())),
         (error) => error.statusCode === 503
     );
 });
 
-test("three-second timeout covers response-body parsing and does not retry", async () => {
-    let identityRequests = 0;
-    const adapter = createAdapter({
-        timeoutMs: 10,
-        paymentDb: paymentAccountDb(),
-        fetchImplementation: async (url, { signal }) => {
-            if (url.endsWith("/internal/permissions/check")) {
-                return permissionResponse("user-verified", "payment.view_own");
+test("timeout covers response-body parsing and does not retry", async () => {
+    for (const call of ["identity", "permission"]) {
+        let requests = 0;
+        const adapter = createAdapter({
+            timeoutMs: 10,
+            fetchImplementation: async (_url, { signal }) => {
+                requests += 1;
+                return {
+                    status: 200,
+                    ok: true,
+                    async json() {
+                        return new Promise((resolve, reject) => {
+                            signal.addEventListener(
+                                "abort",
+                                () => reject(new Error("response body aborted")),
+                                { once: true }
+                            );
+                        });
+                    }
+                };
             }
-            identityRequests += 1;
-            return {
-                status: 200,
-                ok: true,
-                async json() {
-                    return new Promise((resolve, reject) => {
-                        signal.addEventListener(
-                            "abort",
-                            () => reject(new Error("response body aborted")),
-                            { once: true }
-                        );
-                    });
-                }
-            };
-        }
-    });
-
-    await assert.rejects(
-        adapter.authorizePaymentQuery(
-            adapter.authenticateToken(createUserToken()),
-            { work_order_id: "work-order-1" }
-        ),
-        (error) => error.statusCode === 503
-    );
-    assert.equal(identityRequests, 1);
-
-    let permissionRequests = 0;
-    const permissionTimeoutAdapter = createAdapter({
-        timeoutMs: 10,
-        fetchImplementation: async (_url, { signal }) => {
-            permissionRequests += 1;
-            return {
-                status: 200,
-                ok: true,
-                async json() {
-                    return new Promise((resolve, reject) => {
-                        signal.addEventListener(
-                            "abort",
-                            () => reject(new Error("response body aborted")),
-                            { once: true }
-                        );
-                    });
-                }
-            };
-        }
-    });
-
-    await assert.rejects(
-        permissionTimeoutAdapter.requestPermission(
-            permissionTimeoutAdapter.authenticateToken(createUserToken()),
-            "payment.record"
-        ),
-        (error) => error.statusCode === 503
-    );
-    assert.equal(permissionRequests, 1);
+        });
+        const context = adapter.authenticateToken(createUserToken());
+        await assert.rejects(
+            call === "identity"
+                ? adapter.requestCustomerId(context)
+                : adapter.requestPermission(context, "payment.record"),
+            (error) => error.statusCode === 503
+        );
+        assert.equal(requests, 1);
+    }
 });
 
-test("each new identity request issues a new Internal Service JWT", async () => {
+test("each identity request issues a new Internal Service JWT", async () => {
     const internalTokens = [];
     const adapter = createAdapter({
-        paymentDb: paymentAccountDb(),
         internalServiceTokenIssuer: {
             async createToken() {
                 const token = `internal-${internalTokens.length + 1}`;
@@ -618,48 +469,10 @@ test("each new identity request issues a new Internal Service JWT", async () => 
                 return token;
             }
         },
-        fetchImplementation: async (url) => url.endsWith("/internal/permissions/check")
-            ? permissionResponse("user-verified", "payment.view_own")
-            : customerIdentityResponse("user-verified", "customer-verified")
+        fetchImplementation: async () => customerIdentityResponse("user-verified", "customer-verified")
     });
     const authContext = adapter.authenticateToken(createUserToken());
-
-    await adapter.authorizePaymentQuery(
-        authContext,
-        { work_order_id: "work-order-1" }
-    );
-    await adapter.authorizePaymentQuery(
-        authContext,
-        { work_order_id: "work-order-1" }
-    );
-    const identityTokens = internalTokens.filter((token) => (
-        Number(token.slice("internal-".length)) % 2 === 0
-    ));
-    assert.deepEqual(identityTokens, ["internal-2", "internal-4"]);
-    assert.equal(new Set(internalTokens).size, internalTokens.length);
-});
-
-test("local Work Order customer mismatch denies ownership and refund history remains denied", async () => {
-    const adapter = createAdapter({
-        paymentDb: paymentAccountDb("different-customer"),
-        fetchImplementation: async (url) => url.endsWith("/internal/permissions/check")
-            ? permissionResponse("user-verified", "payment.view_own")
-            : customerIdentityResponse("user-verified", "customer-verified")
-    });
-    assert.equal(await adapter.authorizePaymentQuery(
-        adapter.authenticateToken(createUserToken()),
-        { work_order_id: "work-order-1" }
-    ), false);
-    assert.equal(await adapter.authorizeRefundQuery(
-        adapter.authenticateToken(createUserToken()),
-        { work_order_id: "work-order-1" }
-    ), false);
-});
-
-test("refund history remains denied without an approved permission contract", async () => {
-    const adapter = createAdapter();
-    assert.equal(await adapter.authorizeRefundQuery(
-        adapter.authenticateToken(createUserToken()),
-        { payment_id: "payment-1" }
-    ), false);
+    await adapter.requestCustomerId(authContext);
+    await adapter.requestCustomerId(authContext);
+    assert.deepEqual(internalTokens, ["internal-1", "internal-2"]);
 });

@@ -29,7 +29,7 @@ function createHealthHandler(db) {
     };
 }
 
-function createApplication({ db } = {}) {
+function createApplication({ db, paymentRouter } = {}) {
     if (!db || typeof db.raw !== "function") {
         throw new Error("Payment-Service database handle is required");
     }
@@ -39,6 +39,9 @@ function createApplication({ db } = {}) {
     app.use(express.json());
 
     app.get("/health", createHealthHandler(db));
+    if (paymentRouter) {
+        app.use("/", paymentRouter);
+    }
 
     app.use(notFoundHandler);
     app.use(errorHandler);
