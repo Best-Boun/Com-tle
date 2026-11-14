@@ -369,6 +369,21 @@ test("refresh audit rows, logout idempotency, expiry scope, and inactive users o
         assert.ok(expiredAudit);
         assert.equal(expiredAudit.reason, "EXPIRED_TOKEN");
 
+        // Concurrent refresh with one token: real row locks serialize the two
+        // requests; one rotates, the other is treated as reuse and revokes the family.
+        const concurrentLogin = await auth.login(credentials);
+        const concurrentFamily = (await sessionFor(concurrentLogin.refresh_token)).token_family_id;
+        const concurrent = await Promise.allSettled([
+            auth.refresh({ refresh_token: concurrentLogin.refresh_token }),
+            auth.refresh({ refresh_token: concurrentLogin.refresh_token })
+        ]);
+        assert.equal(concurrent.filter((outcome) => outcome.status === "fulfilled").length, 1);
+        assert.equal(concurrent.filter((outcome) => outcome.status === "rejected").length, 1);
+        const concurrentRows = await db("refresh_token_sessions")
+            .where({ token_family_id: concurrentFamily });
+        assert.equal(concurrentRows.length, 2);
+        assert.ok(concurrentRows.every((row) => row.revoked_at !== null));
+
         // A disabled user cannot refresh; the presented session is revoked.
         const otherFamilyRow = await sessionFor(otherFamilyLogin.refresh_token);
         await db("users").where({ user_id: userId }).update({ status: "DISABLED" });

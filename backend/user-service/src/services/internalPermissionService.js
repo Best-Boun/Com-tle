@@ -1,12 +1,10 @@
 const { z } = require("zod");
 const { PERMISSIONS } = require("../../../shared/constants");
 const AppError = require("../../../shared/errors/AppError");
-const { ADMIN_PERMISSIONS } = require("../constants/adminPermissions");
-
-const knownPermissionCodes = new Set([
-    ...Object.values(PERMISSIONS),
-    ...Object.values(ADMIN_PERMISSIONS)
-]);
+// Only domain permissions other services need. User-administration and merge
+// codes (user.*, customer.merge.*) are answered allowed:false without a lookup,
+// so internal callers cannot probe which users are administrators.
+const knownPermissionCodes = new Set(Object.values(PERMISSIONS));
 const requestSchema = z.object({
     user_id: z.string().trim().min(1).max(36),
     permission: z.string().trim().min(1).max(100),

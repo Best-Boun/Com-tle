@@ -648,7 +648,39 @@ test("refresh-token reuse revokes only the affected family", async () => {
     assert.notEqual(otherDeviceRotation.refresh_token, otherDeviceLogin.refresh_token);
 });
 
-test.todo("Concurrent refresh retry behavior remains pending approval");
+// Documented limitation (fail closed): two concurrent refreshes with the same
+// token serialize on the row lock. The first rotates; the second sees a revoked
+// token, is treated as reuse and revokes the whole family (including the token
+// the first request just issued). Clients must send one refresh at a time.
+test("concurrent refresh with one token rotates once, then revokes the family as reuse", async () => {
+    const { db } = await createLoginFixture();
+    const auth = createService(db);
+    const login = await auth.login({
+        email: "customer@example.com",
+        password: "correct horse battery"
+    });
+
+    const outcomes = await Promise.allSettled([
+        auth.refresh({ refresh_token: login.refresh_token }),
+        auth.refresh({ refresh_token: login.refresh_token })
+    ]);
+    const fulfilled = outcomes.filter((outcome) => outcome.status === "fulfilled");
+    const rejected = outcomes.filter((outcome) => outcome.status === "rejected");
+    assert.equal(fulfilled.length, 1);
+    assert.equal(rejected.length, 1);
+    assert.equal(rejected[0].reason.statusCode, 401);
+
+    const rows = db.getState().refresh_token_sessions;
+    assert.equal(rows.length, 2);
+    assert.ok(rows.every((row) => row.revoked_at instanceof Date));
+    assert.ok(db.getState().user_audit_logs.some((event) =>
+        event.action === "AUTH.REFRESH_REUSE_DETECTED"
+    ));
+    await assert.rejects(
+        auth.refresh({ refresh_token: fulfilled[0].value.refresh_token }),
+        (error) => error.statusCode === 401
+    );
+});
 
 test("logout revokes only the current device family and is idempotent", async () => {
     const { db } = await createLoginFixture();
