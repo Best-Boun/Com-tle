@@ -347,6 +347,36 @@ test("internal permission checks use current database permissions and explicitly
     assert.equal(lookups.length, 2);
 });
 
+test("internal permission check denies user-administration codes without a lookup", async () => {
+    const lookups = [];
+    const service = createInternalPermissionService({
+        permissionService: {
+            async activeUserHasPermission(userId, permission) {
+                lookups.push(permission);
+                return true;
+            }
+        }
+    });
+    for (const permission of [
+        "user.list",
+        "user.view",
+        "user.status.manage",
+        "user.role.manage",
+        "customer.merge.request",
+        "customer.merge.approve"
+    ]) {
+        assert.deepEqual(await service.checkPermission({ serviceId: "payment-service" }, {
+            user_id: "user-1",
+            permission
+        }), {
+            user_id: "user-1",
+            permission,
+            allowed: false
+        }, permission);
+    }
+    assert.deepEqual(lookups, []);
+});
+
 test("internal permission check propagates current-permission lookup failures", async () => {
     const service = createInternalPermissionService({
         permissionService: {
