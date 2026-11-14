@@ -312,6 +312,34 @@ test("approved User-Service routes are proxied while internal and unmapped route
     });
 });
 
+test("customer merge routes are proxied only for their exact POST paths", async () => {
+    await withGateway(async ({ request, getProxyCount }) => {
+        const approved = [
+            "/api/users/admin/customer-merge-requests",
+            "/api/users/admin/customer-merge-requests/request-1/approve",
+            "/api/users/admin/customer-merge-requests/request-1/reject",
+            "/api/users/admin/customer-merge-requests/request-1/cancel"
+        ];
+        for (const path of approved) {
+            const response = await request(path, postOptions());
+            assert.equal(response.status, 200, path);
+            assert.equal((await response.json()).path, path.slice("/api/users".length));
+        }
+
+        for (const [path, options] of [
+            ["/api/users/admin/customer-merge-requests", {}],
+            ["/api/users/admin/customer-merge-requests/request-1", {}],
+            ["/api/users/admin/customer-merge-requests/request-1/expire", postOptions()],
+            ["/api/users/admin/customer-merge-requests/request-1/approve", { method: "DELETE" }],
+            ["/api/users/admin/customer-merge-requests/a/b/approve", postOptions()]
+        ]) {
+            const response = await request(path, options);
+            assert.equal(response.status, 404, `${options.method || "GET"} ${path}`);
+        }
+        assert.equal(getProxyCount(), approved.length);
+    });
+});
+
 test("does not proxy service health endpoints through user routes", async () => {
     await withGateway(async ({ request, getProxyCount }) => {
         for (const path of [
