@@ -19,6 +19,7 @@ module.exports = {
             max: Number(process.env.DB_POOL_MAX || 5)
         },
 
+        // Schema comes from baseline/001_payment_service_fresh_schema.sql (Railway).
         migrations: {
             directory: "./migrations",
             tableName: "knex_migrations"

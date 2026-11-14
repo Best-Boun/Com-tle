@@ -3,6 +3,8 @@ const path = require("node:path");
 const dotenv = require("dotenv");
 const { createApplication } = require("./src/app");
 const { createSecurityRuntime } = require("./src/securityRuntime");
+const { createPaymentService } = require("./src/services/paymentService");
+const { createPaymentRouter } = require("./src/routes/paymentRoutes");
 
 function startServer({ env = process.env, database } = {}) {
     if (env === process.env) {
@@ -10,11 +12,18 @@ function startServer({ env = process.env, database } = {}) {
     }
 
     const db = database || require("./src/config/database");
-    const securityRuntime = createSecurityRuntime({
-        env,
-        paymentDb: db
+    const securityRuntime = createSecurityRuntime({ env });
+    const adapter = securityRuntime.userAuthorizationAdapter;
+    const paymentService = createPaymentService({
+        db,
+        requestPermission: adapter.requestPermission,
+        requestCustomerId: adapter.requestCustomerId
     });
-    const app = createApplication({ db });
+    const paymentRouter = createPaymentRouter({
+        paymentService,
+        requireUserAuth: adapter.requireUserAuth
+    });
+    const app = createApplication({ db, paymentRouter });
     const port = env.PORT || 3006;
     const server = app.listen(port, () => {
         console.log(`Payment Service running on port ${port}`);

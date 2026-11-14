@@ -4,7 +4,8 @@ const { z } = require("zod");
 const supportedPermissionRequests = new Set([
     "payment.record",
     "payment.view_own",
-    "can_refund"
+    "payment.refund",
+    "payment.view_all"
 ]);
 const resourceSchema = z.object({
     work_order_id: z.string().trim().min(1).max(36).optional(),
@@ -27,8 +28,7 @@ function createUserAuthorizationAdapter({
     userServiceUrl,
     fetchImplementation = globalThis.fetch,
     timeoutMs = 3000,
-    nodeEnv = process.env.NODE_ENV,
-    paymentDb
+    nodeEnv = process.env.NODE_ENV
 } = {}) {
     if (!userJwtVerifier
         || typeof userJwtVerifier.verify !== "function"
@@ -170,8 +170,8 @@ function createUserAuthorizationAdapter({
     }
 
     async function authorizeRefundActor(authContext, permission) {
-        if (permission !== "can_refund"
-            || !await requestPermission(authContext, "can_refund")) {
+        if (permission !== "payment.refund"
+            || !await requestPermission(authContext, "payment.refund")) {
             throw new AppError("Refund operation is not authorized", 403);
         }
         return authContext.userId;
@@ -249,61 +249,13 @@ function createUserAuthorizationAdapter({
         }
     }
 
-    async function resolveWorkOrderId(resource) {
-        if (typeof resource?.work_order_id === "string") {
-            return resource.work_order_id;
-        }
-        if (!paymentDb || typeof resource?.payment_id !== "string") {
-            return null;
-        }
-        const payment = await paymentDb("payments")
-            .select("work_order_id")
-            .where({ payment_id: resource.payment_id })
-            .first();
-        return payment?.work_order_id || null;
-    }
-
-    async function verifyWorkOrderOwnership(authContext, resource) {
-        if (!paymentDb) {
-            return false;
-        }
-        const workOrderId = await resolveWorkOrderId(resource);
-        if (!workOrderId) {
-            return false;
-        }
-        const customerId = await requestCustomerIdentity(
-            authContext.userId,
-            authContext
-        );
-        if (typeof customerId !== "string" || !customerId.trim()) {
-            return false;
-        }
-        const account = await paymentDb("work_order_payment_accounts")
-            .select("customer_id")
-            .where({ work_order_id: workOrderId })
-            .first();
-        return account?.customer_id === customerId;
-    }
-
-    async function authorizePaymentQuery(authContext, resource) {
-        if (!await requestPermission(authContext, "payment.view_own", resource)) {
-            return false;
-        }
-        try {
-            if (!await verifyWorkOrderOwnership(authContext, resource)) {
-                return false;
-            }
-        } catch {
-            throw new AppError("Customer ownership verification unavailable", 503);
-        }
-        return { allowed: true, include_recorded_by: false };
-    }
-
-    async function authorizeRefundQuery(authContext) {
+    // Customer ID of the verified caller, or null when User-Service says the
+    // caller has no customer identity. Ownership is decided by the caller.
+    async function requestCustomerId(authContext) {
         if (!authenticatedContexts.has(authContext)) {
             throw new AppError("Authentication required", 401);
         }
-        return false;
+        return requestCustomerIdentity(authContext.userId, authContext);
     }
 
     return {
@@ -311,9 +263,8 @@ function createUserAuthorizationAdapter({
         requireUserAuth,
         requestPermission,
         authorizePaymentRecorder,
-        authorizePaymentQuery,
         authorizeRefundActor,
-        authorizeRefundQuery
+        requestCustomerId
     };
 }
 
