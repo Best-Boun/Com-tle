@@ -29,6 +29,27 @@ const deniedProxyPrefixes = [
     "/api/payments"
 ];
 
+// Payment-Service routes under /api/payments. Health and anything else stay unmapped.
+const paymentRoutePatterns = [
+    ["POST", /^\/$/],
+    ["GET", /^\/$/],
+    ["POST", /^\/[^/]+\/void$/],
+    ["POST", /^\/bills$/],
+    ["GET", /^\/balances(?:\/[^/]+)?$/],
+    ["GET", /^\/my$/],
+    ["POST", /^\/refunds$/],
+    ["GET", /^\/refunds$/],
+    ["POST", /^\/refunds\/[^/]+\/(?:approve|reject|execute)$/]
+];
+
+function allowOnly(patterns) {
+    return (req, res, next) => (
+        patterns.some(([method, pathPattern]) => req.method === method && pathPattern.test(req.path))
+            ? next()
+            : denyUnmappedRoute(req, res)
+    );
+}
+
 function denyUnmappedRoute(req, res) {
     return res.status(404).json({
         success: false,
@@ -49,6 +70,7 @@ function createServiceProxy(target) {
 
 function registerServiceRoutes(app, {
     userServiceUrl,
+    paymentServiceUrl,
     loginRateLimiter,
     proxyFactory = createServiceProxy
 } = {}) {
@@ -77,6 +99,10 @@ function registerServiceRoutes(app, {
         },
         proxyFactory(userServiceUrl)
     );
+
+    if (paymentServiceUrl) {
+        app.use("/api/payments", allowOnly(paymentRoutePatterns), proxyFactory(paymentServiceUrl));
+    }
 
     for (const prefix of deniedProxyPrefixes) {
         app.use(prefix, denyUnmappedRoute);

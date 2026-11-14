@@ -414,3 +414,57 @@ test("allows exact CORS origins, rejects others, and supports preflight without 
         assert.equal(getProxyCount(), 0);
     });
 });
+
+test("payment routes are proxied to Payment-Service only for mapped paths", async () => {
+    const app = createGatewayApp({
+        ...testConfig,
+        serviceUrls: { user: "http://user-service.test", payment: "http://payment-service.test" }
+    }, {
+        proxyFactory: (target) => (req, res) => res.status(200).json({
+            target, method: req.method, path: req.url
+        })
+    });
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise((resolve) => server.once("listening", resolve));
+    const { port } = server.address();
+    const call = (path, method = "GET") => fetch(`http://127.0.0.1:${port}${path}`, {
+        method,
+        headers: { "content-type": "application/json" },
+        body: method === "GET" ? undefined : "{}"
+    });
+    try {
+        for (const [path, method, forwarded] of [
+            ["/api/payments", "POST", "/"],
+            ["/api/payments?page=2", "GET", "/?page=2"],
+            ["/api/payments/pay-1/void", "POST", "/pay-1/void"],
+            ["/api/payments/bills", "POST", "/bills"],
+            ["/api/payments/balances", "GET", "/balances"],
+            ["/api/payments/balances/wo-1", "GET", "/balances/wo-1"],
+            ["/api/payments/my", "GET", "/my"],
+            ["/api/payments/refunds", "POST", "/refunds"],
+            ["/api/payments/refunds", "GET", "/refunds"],
+            ["/api/payments/refunds/r-1/approve", "POST", "/refunds/r-1/approve"],
+            ["/api/payments/refunds/r-1/reject", "POST", "/refunds/r-1/reject"],
+            ["/api/payments/refunds/r-1/execute", "POST", "/refunds/r-1/execute"]
+        ]) {
+            const response = await call(path, method);
+            assert.equal(response.status, 200, `${method} ${path}`);
+            assert.deepEqual(await response.json(), {
+                target: "http://payment-service.test", method, path: forwarded
+            });
+        }
+        for (const [path, method] of [
+            ["/api/payments/health", "GET"],
+            ["/api/payments/bills", "GET"],
+            ["/api/payments/pay-1", "DELETE"],
+            ["/api/payments/refunds/r-1/cancel", "POST"],
+            ["/api/payments/balances/wo-1/extra", "GET"],
+            ["/api/payments/internal/anything", "POST"]
+        ]) {
+            const response = await call(path, method);
+            assert.equal(response.status, 404, `${method} ${path}`);
+        }
+    } finally {
+        await new Promise((resolve) => server.close(resolve));
+    }
+});
