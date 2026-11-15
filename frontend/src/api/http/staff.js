@@ -81,5 +81,35 @@ export const staff = {
         const status = active ? "ACTIVE" : "DISABLED";
         await request(`/users/admin/users/${userId}/status`, { method: "PATCH", body: { status } });
         return { user_id: userId, status };
+    },
+
+    /** All accounts, any role. Returns { items, pagination: { page, page_size, total, total_pages } }. */
+    async listUsers({ role, status, search, page = 1, pageSize = 20 } = {}) {
+        const data = await request(`/users/admin/users${query({
+            role: role || undefined,
+            status: status || undefined,
+            search: search?.trim() || undefined,
+            page,
+            limit: pageSize
+        })}`);
+        return {
+            items: (data?.items || []).map(toStaff),
+            pagination: data?.pagination || { page, page_size: pageSize, total: 0, total_pages: 0 }
+        };
+    },
+
+    /** User Service only lets admins grant or remove CUSTOMER and TECHNICIAN. */
+    async addRole(userId, roleCode) {
+        await request(`/users/admin/users/${userId}/roles/${roleCode}`, { method: "PUT" });
+    },
+
+    async removeRole(userId, roleCode) {
+        await request(`/users/admin/users/${userId}/roles/${roleCode}`, { method: "DELETE" });
+    },
+
+    /** Unlock an account that was locked after too many failed sign-ins. */
+    async unlock(userId) {
+        await request(`/users/admin/users/${userId}/status`, { method: "PATCH", body: { status: "ACTIVE" } });
+        return { user_id: userId, status: "ACTIVE" };
     }
 };
