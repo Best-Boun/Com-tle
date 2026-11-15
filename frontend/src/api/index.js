@@ -4,13 +4,14 @@
  * Every module uses the in-browser demo backend (./mock) unless
  * VITE_USE_MOCK=false, in which case modules that have a real implementation
  * (./http/*) call the API Gateway instead. Pages don't need to change.
- * Real implementations today: auth, payments, bookings and catalog.
+ * Real implementations today: auth, staff accounts, payments, bookings and catalog.
  */
 import * as mock from "./mock/index.js";
 import { auth as httpAuth } from "./http/auth.js";
 import { payments as httpPayments, setWorkOrderLoader } from "./http/payments.js";
 import { bookings as httpBookings } from "./http/bookings.js";
 import { catalog as httpCatalog } from "./http/catalog.js";
+import { staff as httpStaff } from "./http/staff.js";
 
 export const USING_MOCK = import.meta.env.VITE_USE_MOCK !== "false";
 
@@ -38,6 +39,7 @@ const dashboard = USING_MOCK ? mock.dashboard : {
 
 export const api = {
     auth: USING_MOCK ? mock.auth : httpAuth,
+    staff: USING_MOCK ? mock.staff : httpStaff,
     catalog: USING_MOCK ? mock.catalog : httpCatalog,
     bookings: USING_MOCK ? mock.bookings : httpBookings,
     repairs,

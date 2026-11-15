@@ -28,6 +28,7 @@ import AdminWorkOrderDetail from "./pages/admin/AdminWorkOrderDetail.jsx";
 import AdminCatalog from "./pages/admin/AdminCatalog.jsx";
 import AdminInventory from "./pages/admin/AdminInventory.jsx";
 import AdminPayments from "./pages/admin/AdminPayments.jsx";
+import AdminStaff from "./pages/admin/AdminStaff.jsx";
 
 const customer = (el) => <RequireRole roles={["CUSTOMER"]}>{el}</RequireRole>;
 
@@ -64,6 +65,7 @@ export default function App() {
                 <Route path="catalog" element={<AdminCatalog />} />
                 <Route path="inventory" element={<AdminInventory />} />
                 <Route path="payments" element={<AdminPayments />} />
+                <Route path="staff" element={<AdminStaff />} />
             </Route>
         </Routes>
     );

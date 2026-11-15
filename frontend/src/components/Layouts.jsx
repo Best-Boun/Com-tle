@@ -112,7 +112,8 @@ const STAFF_NAV = {
         { to: "/admin/work-orders", icon: Icon.Wrench, th: "ใบงานซ่อม", en: "Work orders" },
         { to: "/admin/catalog", icon: Icon.Tag, th: "บริการและราคา", en: "Services & prices" },
         { to: "/admin/inventory", icon: Icon.Box, th: "คลังอะไหล่", en: "Parts stock" },
-        { to: "/admin/payments", icon: Icon.Cash, th: "การเงิน", en: "Payments" }
+        { to: "/admin/payments", icon: Icon.Cash, th: "การเงิน", en: "Payments" },
+        { to: "/admin/staff", icon: Icon.User, th: "บัญชีช่าง", en: "Technicians" }
     ],
     TECHNICIAN: [
         { to: "/tech", end: true, icon: Icon.Clipboard, th: "งานของฉัน", en: "My jobs" },
