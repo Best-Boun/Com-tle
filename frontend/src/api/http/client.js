@@ -3,9 +3,9 @@
  * Errors become ApiError with Thai + English text, like the demo backend.
  */
 import { ApiError } from "../mock/db.js";
+import { API_URL, accessToken, authFetch } from "./tokens.js";
 
-export const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000/api").replace(/\/$/, "");
-const TOKEN_KEY = "smartfix-session";
+export { API_URL };
 
 /** English messages from booking-service / catalog-service, translated for the UI. */
 const THAI = {
@@ -49,27 +49,16 @@ function translate(en) {
     return en;
 }
 
-export function accessToken() {
-    try {
-        return JSON.parse(localStorage.getItem(TOKEN_KEY))?.accessToken || null;
-    } catch {
-        return null;
-    }
-}
+export { accessToken };
 
 export async function request(path, { method = "GET", body, auth = true } = {}) {
     const headers = { accept: "application/json" };
     if (body !== undefined) headers["content-type"] = "application/json";
-    const token = auth ? accessToken() : null;
-    if (token) headers.authorization = `Bearer ${token}`;
+    const init = { method, headers, body: body === undefined ? undefined : JSON.stringify(body) };
 
     let response;
     try {
-        response = await fetch(`${API_URL}${path}`, {
-            method,
-            headers,
-            body: body === undefined ? undefined : JSON.stringify(body)
-        });
+        response = await (auth ? authFetch : fetch)(`${API_URL}${path}`, init);
     } catch {
         throw new ApiError({ th: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้", en: "Cannot reach the server" }, 503);
     }

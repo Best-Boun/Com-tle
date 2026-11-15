@@ -7,9 +7,7 @@
  */
 import { ApiError } from "../mock/db.js";
 import { getSessionUser } from "../session.js";
-
-const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000/api").replace(/\/$/, "");
-const TOKEN_KEY = "smartfix-session";
+import { API_URL, authFetch } from "./tokens.js";
 
 const THAI = {
     "Payment exceeds the outstanding balance": "ยอดเกินยอดค้างชำระ",
@@ -28,26 +26,17 @@ const THAI = {
     "Authentication required": "กรุณาเข้าสู่ระบบ"
 };
 
-function accessToken() {
-    try {
-        return JSON.parse(localStorage.getItem(TOKEN_KEY))?.accessToken || null;
-    } catch {
-        return null;
-    }
-}
-
 function fail(th, en, status = 400) {
     return new ApiError({ th, en }, status);
 }
 
 async function request(path, { method = "GET", body, idempotent = false } = {}) {
     const headers = { "content-type": "application/json" };
-    const token = accessToken();
-    if (token) headers.authorization = `Bearer ${token}`;
+    // A retry after a token refresh reuses the same key, so it is never applied twice.
     if (idempotent) headers["idempotency-key"] = crypto.randomUUID();
     let response;
     try {
-        response = await fetch(`${API_URL}${path}`, {
+        response = await authFetch(`${API_URL}${path}`, {
             method,
             headers,
             body: body === undefined ? undefined : JSON.stringify(body)

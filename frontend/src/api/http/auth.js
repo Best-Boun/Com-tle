@@ -4,10 +4,7 @@
  */
 import { ApiError } from "../mock/db.js";
 import { getSessionUser, setSessionUser } from "../session.js";
-
-const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:3000/api").replace(/\/$/, "");
-const REFRESH_KEY = "smartfix-refresh-token";
-const TOKEN_KEY = "smartfix-session";
+import { API_URL, accessToken, authFetch, readRefreshToken, storeRefreshToken } from "./tokens.js";
 
 const MESSAGES = {
     401: { th: "อีเมลหรือรหัสผ่านไม่ถูกต้อง", en: "Invalid email or password" },
@@ -16,40 +13,13 @@ const MESSAGES = {
     429: { th: "ลองเข้าสู่ระบบบ่อยเกินไป กรุณารอสักครู่", en: "Too many login attempts" }
 };
 
-function accessToken() {
-    try {
-        return JSON.parse(localStorage.getItem(TOKEN_KEY))?.accessToken || null;
-    } catch {
-        return null;
-    }
-}
-
-function storeRefreshToken(token) {
-    try {
-        if (token) localStorage.setItem(REFRESH_KEY, token);
-        else localStorage.removeItem(REFRESH_KEY);
-    } catch {
-        // storage unavailable
-    }
-}
-
-function readRefreshToken() {
-    try {
-        return localStorage.getItem(REFRESH_KEY);
-    } catch {
-        return null;
-    }
-}
-
+// Calls with auth: true refresh an expired access token and retry. Login and
+// register (auth: false) never do: a 401 there means a wrong password.
 async function request(path, { method = "GET", body, auth = false } = {}) {
     const headers = { "content-type": "application/json" };
-    if (auth) {
-        const token = accessToken();
-        if (token) headers.authorization = `Bearer ${token}`;
-    }
     let response;
     try {
-        response = await fetch(`${API_URL}${path}`, {
+        response = await (auth ? authFetch : fetch)(`${API_URL}${path}`, {
             method,
             headers,
             body: body === undefined ? undefined : JSON.stringify(body)
