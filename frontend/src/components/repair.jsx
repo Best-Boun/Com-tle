@@ -9,7 +9,8 @@ export function RepairProgress({ status, handedOver }) {
     if (status === "CANCELLED") return null;
     const index = WO_STAGES.indexOf(status);
     return (
-        <ol className="steps" style={{ "--count": WO_STAGES.length + 1 }} aria-label="progress">
+        <ol className="steps" style={{ "--count": WO_STAGES.length + 2 }} aria-label="progress">
+            <li className="done"><span>{t("status.wo.RECEIVED")}</span></li>
             {WO_STAGES.map((s, i) => (
                 <li key={s} className={i < index || (handedOver && i === index) ? "done" : i === index ? "current" : ""}>
                     <span>{t(`status.wo.${s}`)}</span>

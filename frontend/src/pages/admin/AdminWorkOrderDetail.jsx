@@ -188,16 +188,28 @@ export default function AdminWorkOrderDetail() {
                     <section className="panel stack">
                         <h3>{L("ช่างผู้รับผิดชอบ", "Technician")}</h3>
                         {isOpen ? (
-                            <select
-                                className="select"
-                                aria-label={L("มอบหมายช่าง", "Assign technician")}
-                                value={w.technician_id || ""}
-                                disabled={busy}
-                                onChange={(e) => e.target.value && act(() => api.repairs.assignTechnician(w.work_order_id, e.target.value), L("มอบหมายช่างแล้ว", "Technician assigned"))}
-                            >
-                                <option value="">{L("— เลือกช่าง —", "— Choose —")}</option>
-                                {techs.data?.map((u) => <option key={u.user_id} value={u.user_id}>{u.full_name}</option>)}
-                            </select>
+                            <div className="stack">
+                                <select
+                                    className="select"
+                                    aria-label={L("มอบหมายช่าง", "Assign technician")}
+                                    value={w.technician_id || ""}
+                                    disabled={busy || techs.loading || Boolean(techs.error) || techs.data?.length === 0}
+                                    onChange={(e) => e.target.value && act(() => api.repairs.assignTechnician(w.work_order_id, e.target.value), L("มอบหมายช่างแล้ว", "Technician assigned"))}
+                                >
+                                    <option value="">
+                                        {techs.loading
+                                            ? L("กำลังโหลดรายชื่อช่าง...", "Loading technicians...")
+                                            : techs.data?.length
+                                                ? L("— เลือกช่าง —", "— Choose —")
+                                                : L("ยังไม่มีช่างที่เปิดใช้งาน", "No active technicians")}
+                                    </option>
+                                    {techs.data?.map((u) => <option key={u.user_id} value={u.user_id}>{u.full_name}</option>)}
+                                </select>
+                                {techs.error && <ErrorNotice error={techs.error} onRetry={techs.reload} />}
+                                {!techs.loading && !techs.error && !techs.data?.length && (
+                                    <p className="muted small">{L("เพิ่มบัญชีช่างที่เปิดใช้งานได้จากเมนูบัญชีช่าง", "Add an active technician account from Technician Accounts.")}</p>
+                                )}
+                            </div>
                         ) : <p>{w.technician_name || "—"}</p>}
                     </section>
 

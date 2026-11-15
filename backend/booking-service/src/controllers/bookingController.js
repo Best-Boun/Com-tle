@@ -57,7 +57,8 @@ function createBookingController(bookingService) {
             const booking = await bookingService.checkIn(
                 req.params.bookingId,
                 req.user,
-                context(req)
+                context(req),
+                req.body || {}
             );
             res.status(200).json(successResponse("Booking completed, work order created", booking));
         })

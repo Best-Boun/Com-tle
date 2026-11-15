@@ -132,7 +132,7 @@ function seed() {
         { history_id: newId(), booking_id: "bk-4", old_status: "PENDING", new_status: "CANCELLED", changed_by: "u-cust-2", reason: "ติดธุระ จะจองใหม่ภายหลัง", created_at: ago(7) }
     ];
 
-    // Work orders (Repair Service — not built yet, shape proposed here)
+    // Work orders mirror the Repair-Service response shape for demo mode.
     const workOrders = [
         {
             work_order_id: "wo-1", work_order_number: "WO-0001", source: "BOOKING", booking_id: "bk-3",

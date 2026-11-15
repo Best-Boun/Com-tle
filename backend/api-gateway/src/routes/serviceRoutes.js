@@ -24,7 +24,6 @@ const publicUserRoutePatterns = [
 const deniedProxyPrefixes = [
     "/api/bookings",
     "/api/catalog",
-    "/api/repairs",
     "/api/inventory",
     "/api/payments"
 ];
@@ -67,6 +66,30 @@ const catalogRoutePatterns = [
     ["GET", /^\/audit-logs$/]
 ];
 
+// Repair-Service routes under /api/repairs.
+const repairRoutePatterns = [
+    ["POST", /^\/work-orders$/],
+    ["POST", /^\/work-orders\/walk-in$/],
+    ["GET", /^\/work-orders$/],
+    ["GET", /^\/work-orders\/me$/],
+    ["GET", /^\/work-orders\/assigned$/],
+    ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/assign$`)],
+    ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/diagnosis\\/start$`)],
+    ["PUT", new RegExp(`^\\/work-orders\\/${UUID}\\/diagnosis$`)],
+    ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/quotations$`)],
+    ["PUT", new RegExp(`^\\/quotations\\/${UUID}\\/send$`)],
+    ["POST", new RegExp(`^\\/quotations\\/${UUID}\\/(?:revise|decision)$`)],
+    ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/repair\\/start$`)],
+    ["PUT", new RegExp(`^\\/work-orders\\/${UUID}\\/repair\\/result$`)],
+    ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/(?:tests|handover|cancel)$`)],
+    ["GET", /^\/parts$/],
+    ["POST", /^\/parts$/],
+    ["GET", /^\/parts\/movements$/],
+    ["POST", new RegExp(`^\\/parts\\/${UUID}\\/receive$`)],
+    ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/parts\\/issue$`)],
+    ["GET", new RegExp(`^\\/work-orders\\/${UUID}$`)]
+];
+
 function allowOnly(patterns) {
     return (req, res, next) => (
         patterns.some(([method, pathPattern]) => req.method === method && pathPattern.test(req.path))
@@ -98,6 +121,7 @@ function registerServiceRoutes(app, {
     paymentServiceUrl,
     bookingServiceUrl,
     catalogServiceUrl,
+    repairServiceUrl,
     loginRateLimiter,
     proxyFactory = createServiceProxy
 } = {}) {
@@ -137,6 +161,10 @@ function registerServiceRoutes(app, {
 
     if (catalogServiceUrl) {
         app.use("/api/catalog", allowOnly(catalogRoutePatterns), proxyFactory(catalogServiceUrl));
+    }
+
+    if (repairServiceUrl) {
+        app.use("/api/repairs", allowOnly(repairRoutePatterns), proxyFactory(repairServiceUrl));
     }
 
     for (const prefix of deniedProxyPrefixes) {

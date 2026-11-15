@@ -67,7 +67,7 @@ Create body:
 
 **Catalog** — `GET {CATALOG_SERVICE_URL}/services/:id` with the caller's token. The service and its category must be active.
 
-**Repair (contract to agree with the Repair owner)** — on check-in:
+**Repair Service** — on check-in:
 
 ```
 POST {REPAIR_SERVICE_URL}/work-orders
@@ -75,10 +75,13 @@ Authorization: <admin token forwarded>
 Idempotency-Key: booking-<booking_id>
 
 { "source": "BOOKING", "booking_id", "booking_number", "customer_id",
-  "service_id", "service_code", "service_name", "device_type", "brand", "model", "serial_number", "reported_symptom", "scheduled_at" }
+  "service_id", "service_code", "service_name", "device_type", "brand", "model",
+  "serial_number", "accessories", "reported_symptom", "scheduled_at" }
 ```
 
-Expected response `2xx { "data": { "work_order_id": "<uuid>" } }`. Repair must return the **same** work order when the same Idempotency-Key is sent again. If Repair fails or times out, the booking stays CONFIRMED and check-in can be retried safely.
+Expected response `2xx { "data": { "work_order_id": "<uuid>" } }`. Repair returns the
+same work order for a repeated booking id. If Repair fails or times out, the booking
+stays CONFIRMED and check-in can be retried safely.
 
 ## Concurrency
 

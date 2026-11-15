@@ -91,10 +91,13 @@ export const bookings = {
 
     /**
      * Customer arrived: Booking-Service asks Repair-Service to open the work order.
-     * Until Repair-Service exists this fails with 503 and the booking stays CONFIRMED.
+     * The booking stays CONFIRMED if Repair-Service cannot open the work order.
      */
-    async checkIn(bookingId) {
-        const booking = await request(`/bookings/${encodeURIComponent(bookingId)}/check-in`, { method: "POST" });
+    async checkIn(bookingId, { accessories } = {}) {
+        const booking = await request(`/bookings/${encodeURIComponent(bookingId)}/check-in`, {
+            method: "POST",
+            body: { accessories: accessories?.trim() || null }
+        });
         return { booking: await withCustomerName(booking), work_order: { work_order_id: booking.work_order_id } };
     },
 
