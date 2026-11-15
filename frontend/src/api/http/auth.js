@@ -134,7 +134,7 @@ export const auth = {
     },
 
     async listTechnicians() {
-        const data = await request("/users/admin/users?role=TECHNICIAN&limit=100", { auth: true });
+        const data = await request("/users/admin/users?role=TECHNICIAN&status=ACTIVE&limit=100", { auth: true });
         return data.items;
     }
 };

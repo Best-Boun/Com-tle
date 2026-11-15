@@ -29,7 +29,16 @@ const THAI = {
     "Category code or name already exists": "รหัสหรือชื่อหมวดนี้มีอยู่แล้ว",
     "Category name already exists": "ชื่อหมวดนี้มีอยู่แล้ว",
     "Category does not exist or is inactive": "หมวดหมู่ไม่มีอยู่หรือถูกปิด",
-    "API endpoint not found": "ไม่พบ API นี้ที่ Gateway"
+    "API endpoint not found": "ไม่พบ API นี้ที่ Gateway",
+    "An account with this email already exists": "อีเมลนี้มีบัญชีอยู่แล้ว",
+    "Invalid registration details": "ข้อมูลไม่ถูกต้อง: ชื่อ อีเมล หรือรหัสผ่าน (อย่างน้อย 8 ตัว)",
+    "User not found": "ไม่พบบัญชีนี้",
+    "User already has this role": "บัญชีนี้เป็นช่างอยู่แล้ว",
+    "Administrators cannot change their own status": "ปิดบัญชีของตัวเองไม่ได้",
+    "Administrators cannot modify their own roles": "เปลี่ยนสิทธิ์ของตัวเองไม่ได้",
+    "Cannot disable the last active administrator": "ปิดผู้ดูแลคนสุดท้ายไม่ได้",
+    "Invalid account status transition": "เปลี่ยนสถานะบัญชีนี้ไม่ได้",
+    "Too many requests": "ทำรายการบ่อยเกินไป กรุณารอสักครู่"
 };
 
 function translate(en) {

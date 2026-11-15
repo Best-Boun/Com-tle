@@ -71,6 +71,10 @@ export const auth = {
         if (!user || password !== (user.password || DEMO_PASSWORD)) {
             throw bad("อีเมลหรือรหัสผ่านไม่ถูกต้อง", "Invalid email or password", 401);
         }
+        if (user.status === "DISABLED") {
+            // Same answer as User Service: a disabled account looks like a wrong password.
+            throw bad("อีเมลหรือรหัสผ่านไม่ถูกต้อง", "Invalid email or password", 401);
+        }
         const { password: _pw, ...safe } = user;
         setSessionUser(safe);
         return respond({ user: safe, accessToken: "demo-token" });
@@ -116,7 +120,60 @@ export const auth = {
 
     listTechnicians: handler(async () => {
         requireRole("ADMIN");
-        return respond(getDb().users.filter((u) => has(u, "TECHNICIAN")).map(({ password: _p, ...u }) => u));
+        return respond(getDb().users.filter((u) => has(u, "TECHNICIAN") && u.status !== "DISABLED").map(({ password: _p, ...u }) => u));
+    })
+};
+
+// ---------------------------------------------------------------- staff accounts (admin creates technicians)
+const toStaff = ({ password: _p, ...u }) => ({ ...u, status: u.status || "ACTIVE" });
+
+export const staff = {
+    list: handler(async () => {
+        requireRole("ADMIN");
+        return respond(getDb().users.filter((u) => has(u, "TECHNICIAN")).map(toStaff));
+    }),
+
+    createTechnician: handler(async ({ full_name, email, password, phone }) => {
+        requireRole("ADMIN");
+        const db = getDb();
+        if (!full_name?.trim() || !email?.trim() || !password) {
+            throw bad("กรอกชื่อ อีเมล และรหัสผ่านให้ครบ", "Name, email and password are required");
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) throw bad("อีเมลไม่ถูกต้อง", "Invalid email");
+        if (password.length < 8) throw bad("รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร", "Password must be at least 8 characters");
+        if (db.users.some((u) => u.email.toLowerCase() === email.trim().toLowerCase())) {
+            throw bad("อีเมลนี้มีบัญชีอยู่แล้ว", "An account with this email already exists", 409);
+        }
+        const user = {
+            user_id: newId(),
+            full_name: full_name.trim(),
+            email: email.trim().toLowerCase(),
+            phone: phone?.trim() || null,
+            roles: ["TECHNICIAN"],
+            status: "ACTIVE",
+            password
+        };
+        db.users.push(user);
+        return respond(toStaff(user));
+    }),
+
+    promoteByEmail: handler(async (email) => {
+        requireRole("ADMIN");
+        const wanted = String(email || "").trim().toLowerCase();
+        const user = getDb().users.find((u) => u.email.toLowerCase() === wanted);
+        if (!user) throw bad("ไม่พบบัญชีที่ใช้อีเมลนี้", "No account uses this email", 404);
+        if (has(user, "ADMIN")) throw bad("บัญชีนี้เป็นผู้ดูแลระบบ ตั้งเป็นช่างจากหน้านี้ไม่ได้", "This is an admin account", 409);
+        user.roles = ["TECHNICIAN"];
+        return respond(toStaff(user));
+    }),
+
+    setStatus: handler(async (userId, active) => {
+        const me = requireRole("ADMIN");
+        if (userId === me.user_id) throw bad("ปิดบัญชีของตัวเองไม่ได้", "You cannot change your own status", 403);
+        const user = getDb().users.find((u) => u.user_id === userId);
+        if (!user) throw bad("ไม่พบบัญชีนี้", "User not found", 404);
+        user.status = active ? "ACTIVE" : "DISABLED";
+        return respond({ user_id: userId, status: user.status });
     })
 };
 
