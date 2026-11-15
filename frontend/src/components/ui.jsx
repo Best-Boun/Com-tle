@@ -90,13 +90,17 @@ export function Modal({ title, onClose, children, footer, wide = false }) {
     const { t } = useI18n();
     const ref = useRef(null);
     const titleId = useId();
+    // Keep the latest onClose without re-running the effect: parents pass a new
+    // arrow function on every render, and re-running would steal focus on each keystroke.
+    const onCloseRef = useRef(onClose);
+    onCloseRef.current = onClose;
 
     useEffect(() => {
         const previous = document.activeElement;
-        const first = ref.current?.querySelector("input, select, textarea, button:not([data-close])");
+        const first = ref.current?.querySelector("input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([data-close])");
         (first || ref.current)?.focus();
         const onKey = (e) => {
-            if (e.key === "Escape") onClose();
+            if (e.key === "Escape") onCloseRef.current();
         };
         document.addEventListener("keydown", onKey);
         document.body.style.overflow = "hidden";
@@ -105,10 +109,10 @@ export function Modal({ title, onClose, children, footer, wide = false }) {
             document.body.style.overflow = "";
             previous?.focus?.();
         };
-    }, [onClose]);
+    }, []); // run once when the modal opens
 
     return (
-        <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+        <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onCloseRef.current()}>
             <div className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={ref} tabIndex={-1} style={wide ? { width: "min(760px, 100%)" } : undefined}>
                 <div className="modal-head">
                     <h2 id={titleId} style={{ fontSize: "var(--fs-lg)" }}>{title}</h2>
