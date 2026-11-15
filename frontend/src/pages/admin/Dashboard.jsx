@@ -3,6 +3,7 @@ import { useI18n } from "../../i18n/I18nProvider.jsx";
 import { api } from "../../api/index.js";
 import { useAsync } from "../../utils/useAsync.js";
 import { ErrorNotice, Loading, Money, PageHead, StatusBadge } from "../../components/ui.jsx";
+import { Icon } from "../../components/icons.jsx";
 import "./admin.css";
 
 export default function Dashboard() {
@@ -25,6 +26,13 @@ export default function Dashboard() {
         <div className="stack-lg">
             <PageHead title={L("ภาพรวมวันนี้", "Today")} lede={fmt.dateLong(new Date().toISOString())} />
 
+            <div className="kpi-row">
+                <div className="kpi"><span className="kpi-icon"><Icon.Calendar /></span><span className="kpi-label">{L("นัดวันนี้", "Appointments today")}</span><strong className="num">{d.bookings_today}</strong></div>
+                <div className="kpi"><span className="kpi-icon"><Icon.Wrench /></span><span className="kpi-label">{L("งานที่เปิดอยู่", "Open jobs")}</span><strong className="num">{d.open_work_orders}</strong></div>
+                <div className="kpi"><span className="kpi-icon"><Icon.Clipboard /></span><span className="kpi-label">{L("รอลูกค้าอนุมัติ", "Awaiting customer")}</span><strong className="num">{d.waiting_approval}</strong></div>
+                <div className="kpi kpi-money"><span className="kpi-icon"><Icon.Cash /></span><span className="kpi-label">{L("ยอดค้างชำระรวม", "Outstanding")}</span><strong className="num"><Money value={d.outstanding_total} /></strong></div>
+            </div>
+
             <div className="dash-grid">
                 <section className="stack">
                     <h2>{L("ต้องจัดการ", "Needs attention")}</h2>
@@ -41,14 +49,8 @@ export default function Dashboard() {
                 </section>
 
                 <section className="stack">
-                    <h2>{L("ตัวเลขร้าน", "Shop at a glance")}</h2>
-                    <dl className="facts glance">
-                        <dt>{L("นัดวันนี้", "Appointments today")}</dt><dd className="num">{d.bookings_today}</dd>
-                        <dt>{L("งานที่เปิดอยู่", "Open jobs")}</dt><dd className="num">{d.open_work_orders}</dd>
-                        <dt>{L("รอลูกค้าอนุมัติ", "Awaiting customer")}</dt><dd className="num">{d.waiting_approval}</dd>
-                        <dt>{L("ยอดค้างชำระรวม", "Outstanding")}</dt><dd><Money value={d.outstanding_total} /></dd>
-                    </dl>
-                    <div className="status-bars" aria-label={L("งานแยกตามสถานะ", "Jobs by status")}>
+                    <h2>{L("งานซ่อมแยกตามขั้นตอน", "Jobs by stage")}</h2>
+                    <div className="status-bars panel" aria-label={L("งานแยกตามสถานะ", "Jobs by status")}>
                         {d.work_by_status.map((s) => (
                             <div key={s.status} className="status-bar">
                                 <span className="small">{t(`status.wo.${s.status}`)}</span>

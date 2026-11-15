@@ -4,6 +4,7 @@ import { useI18n } from "../../i18n/I18nProvider.jsx";
 import { homeFor, useAuth } from "../../auth/AuthProvider.jsx";
 import { api, USING_MOCK } from "../../api/index.js";
 import { errorText } from "../../utils/errors.js";
+import AuthShell from "../../components/AuthShell.jsx";
 import { TextField } from "../../components/ui.jsx";
 import "./home.css";
 
@@ -34,8 +35,8 @@ export default function Login() {
     }
 
     return (
-        <div className="auth-wrap">
-            <form className="panel stack" onSubmit={signIn} noValidate>
+        <AuthShell>
+            <form className="stack" onSubmit={signIn} noValidate>
                 <h1>{L("เข้าสู่ระบบ", "Sign in")}</h1>
                 {location.state?.from && <div className="notice info">{L("เข้าสู่ระบบก่อนเพื่อจองคิวและติดตามงานซ่อม", "Sign in to book and track your repairs.")}</div>}
                 <TextField label={L("อีเมล", "Email")} type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
@@ -46,21 +47,21 @@ export default function Login() {
             </form>
 
             {/* Demo accounts exist only in the mock backend; hide them when auth is real. */}
-            {USING_MOCK && <section className="stack">
-                <h2>{L("ทดลองใช้ด้วยบัญชีตัวอย่าง", "Try a demo account")}</h2>
+            {USING_MOCK && <section className="stack demo-box">
+                <h2 className="small">{L("ทดลองใช้ด้วยบัญชีตัวอย่าง", "Try a demo account")}</h2>
                 <p className="muted small">
                     {L("ตอนนี้หน้าเว็บใช้ข้อมูลตัวอย่าง กดเพื่อเข้าดูหน้าของแต่ละบทบาทได้เลย (รหัสผ่าน ", "The site runs on demo data. Pick a role to see its screens (password ")}
                     <code>{api.demo.password}</code>)
                 </p>
                 <div className="demo-accounts">
                     {api.demo.accounts.map((a) => (
-                        <button key={a.role} type="button" className="btn btn-secondary btn-lg" disabled={busy} onClick={() => signIn(null, { email: a.email, password: api.demo.password })}>
+                        <button key={a.role} type="button" className="btn btn-secondary" disabled={busy} onClick={() => signIn(null, { email: a.email, password: api.demo.password })}>
                             <span>{t(`role.${a.role}`)}</span>
                             <span className="faint small">{a.email}</span>
                         </button>
                     ))}
                 </div>
             </section>}
-        </div>
+        </AuthShell>
     );
 }

@@ -6,6 +6,7 @@ import "./styles/base.css";
 import "./styles/components.css";
 import "./styles/layout.css";
 import "./styles/ticket.css";
+import "./styles/board.css";
 import App from "./App.jsx";
 import { I18nProvider } from "./i18n/I18nProvider.jsx";
 import { AuthProvider } from "./auth/AuthProvider.jsx";

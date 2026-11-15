@@ -33,7 +33,8 @@ export default function Register() {
     }
 
     return (
-        <form className="panel stack" style={{ maxWidth: 480 }} onSubmit={submit} noValidate>
+        <AuthShell>
+        <form className="stack" onSubmit={submit} noValidate>
             <h1>{L("สมัครสมาชิก", "Create an account")}</h1>
             <p className="muted small">{L("ใช้บัญชีนี้จองคิว อนุมัติราคา และติดตามงานซ่อม", "Use it to book, approve quotations and track repairs.")}</p>
             <TextField label={L("ชื่อ-นามสกุล", "Full name")} autoComplete="name" value={form.full_name} onChange={set("full_name")} required />
@@ -44,5 +45,6 @@ export default function Register() {
             <button type="submit" className="btn btn-primary btn-lg" disabled={busy}>{busy ? t("common.loading") : L("สมัครสมาชิก", "Create account")}</button>
             <p className="small muted">{L("มีบัญชีแล้ว?", "Already have an account?")} <Link to="/login">{L("เข้าสู่ระบบ", "Sign in")}</Link></p>
         </form>
+        </AuthShell>
     );
 }

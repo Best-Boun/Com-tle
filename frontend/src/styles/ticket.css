@@ -18,7 +18,7 @@
 
 a.ticket:hover {
     color: var(--ink);
-    box-shadow: 0 1px 0 rgba(23, 33, 43, 0.06), 0 12px 28px -12px rgba(23, 33, 43, 0.38);
+    box-shadow: 0 1px 0 rgba(15, 28, 38, 0.06), 0 12px 28px -12px rgba(15, 28, 38, 0.38);
 }
 
 /* Left strip with the punched hole and string */
@@ -152,124 +152,20 @@ a.ticket:hover {
     }
 }
 
-/* ---------- Home hero: a large live ticket ---------- */
-.hero {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
-    gap: var(--s7);
-    align-items: center;
-    padding: var(--s6) 0 var(--s7);
-}
-
-.hero h1 {
-    font-size: var(--fs-4xl);
-    line-height: 1.15;
-    letter-spacing: -0.025em;
-    max-width: 14ch;
-}
-
-.hero-lede {
-    margin-top: var(--s4);
-    font-size: var(--fs-lg);
-    color: var(--ink-soft);
-    max-width: 36ch;
-}
-
-.hero .btn-row {
-    margin-top: var(--s5);
-}
-
-.hero-ticket {
-    position: relative;
-    transform: rotate(1.5deg);
-}
-
-/* the string the tag hangs from */
-.hero-ticket::before {
-    content: "";
-    position: absolute;
-    left: -64px;
-    top: 24px;
-    width: 92px;
-    height: 2px;
-    background: #9b8c6e;
-    transform: rotate(-12deg);
-    transform-origin: right center;
-}
-
-.hero-ticket .ticket {
-    grid-template-columns: 72px minmax(0, 1fr);
-}
-
-.hero-ticket .ticket-tag::before {
-    top: 22px;
-    width: 18px;
-    height: 18px;
-    margin-left: -9px;
-}
-
-.hero-ticket .ticket-body {
-    padding: var(--s5) var(--s6);
-    gap: var(--s3);
-}
-
-.hero-ticket .ticket-number {
-    font-size: var(--fs-3xl);
-    line-height: 1.1;
-}
-
+/* ---------- Home hero ticket (stamp animation) ---------- */
 .hero-steps {
-    margin-top: var(--s3);
+    margin-top: var(--s2);
 }
 
 .hero-stamp {
     position: absolute;
-    right: var(--s5);
-    top: var(--s5);
-    font-size: var(--fs-sm);
+    right: var(--s4);
+    top: var(--s4);
+    font-size: var(--fs-xs);
     animation: stamp-in 380ms cubic-bezier(0.2, 1.4, 0.4, 1);
 }
 
 @keyframes stamp-in {
     from { opacity: 0; transform: rotate(-4deg) scale(1.6); }
     to { opacity: 1; transform: rotate(-4deg) scale(1); }
-}
-
-@media (max-width: 900px) {
-    .hero {
-        grid-template-columns: 1fr;
-        gap: var(--s6);
-        padding-top: var(--s4);
-    }
-
-    .hero h1 {
-        font-size: var(--fs-3xl);
-    }
-
-    .hero-ticket {
-        transform: none;
-    }
-
-    .hero-ticket::before {
-        display: none;
-    }
-}
-
-@media (max-width: 640px) {
-    .hero-ticket .ticket {
-        grid-template-columns: 40px minmax(0, 1fr);
-    }
-
-    .hero-ticket .ticket-body {
-        padding: var(--s4);
-    }
-
-    .hero-ticket .ticket-number {
-        font-size: var(--fs-2xl);
-    }
-
-    .hero-stamp {
-        position: static;
-        justify-self: start;
-    }
 }

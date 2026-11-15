@@ -4,6 +4,7 @@ import { useI18n } from "../../i18n/I18nProvider.jsx";
 import { api } from "../../api/index.js";
 import { useAsync } from "../../utils/useAsync.js";
 import { ErrorNotice, Loading, Money, PageHead } from "../../components/ui.jsx";
+import { CategoryIcon } from "../../components/icons.jsx";
 import "./home.css";
 
 export default function Services() {
@@ -60,22 +61,23 @@ export default function Services() {
                     {groups.length === 0 && <p className="muted">{L("ไม่พบบริการที่ค้นหา", "No services match your search.")}</p>}
 
                     {groups.map((g) => (
-                        <section key={g.category_id} className="stack">
-                            <div>
-                                <h2>{g.category_name}</h2>
-                                {g.description && <p className="muted small">{g.description}</p>}
+                        <section key={g.category_id} className="service-group">
+                            <div className="service-group-head">
+                                <span className="service-card-icon"><CategoryIcon code={g.category_code} /></span>
+                                <div>
+                                    <h2>{g.category_name}</h2>
+                                    {g.description && <p className="muted small">{g.description}</p>}
+                                </div>
                             </div>
-                            <ul className="service-rows">
+                            <ul className="service-cards">
                                 {g.services.map((s) => (
-                                    <li key={s.service_id}>
-                                        <div className="service-main">
-                                            <h3>{s.service_name}</h3>
-                                            {s.description && <p className="muted small">{s.description}</p>}
-                                            <span className="small faint">{L("ใช้เวลาประมาณ", "About")} {s.estimated_duration_minutes} {L("นาที", "min")}</span>
-                                        </div>
-                                        <div className="service-side">
-                                            <span className="num service-price">{L("เริ่ม", "from")} <Money value={s.starting_price} /></span>
-                                            <Link to={`/book?service=${s.service_id}`} className="btn btn-secondary btn-sm">{L("จองบริการนี้", "Book this")}</Link>
+                                    <li key={s.service_id} className="service-card">
+                                        <h3>{s.service_name}</h3>
+                                        {s.description && <p className="small muted">{s.description}</p>}
+                                        <span className="small faint">{L("ใช้เวลาประมาณ", "About")} {s.estimated_duration_minutes} {L("นาที", "min")}</span>
+                                        <div className="service-card-foot">
+                                            <span className="price-tag"><span className="small">{L("เริ่ม", "from")}</span> <Money value={s.starting_price} /></span>
+                                            <Link to={`/book?service=${s.service_id}`} className="btn btn-primary btn-sm">{L("จองบริการนี้", "Book this")}</Link>
                                         </div>
                                     </li>
                                 ))}

@@ -3,7 +3,7 @@
     position: sticky;
     top: 0;
     z-index: 20;
-    background: rgba(238, 241, 239, 0.92);
+    background: rgba(255, 255, 255, 0.94);
     backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--line-soft);
 }
@@ -12,7 +12,7 @@
     max-width: var(--content);
     margin: 0 auto;
     padding: 0 var(--s5);
-    height: 64px;
+    height: 68px;
     display: flex;
     align-items: center;
     gap: var(--s5);
@@ -34,8 +34,8 @@
 }
 
 .brand-mark {
-    width: 26px;
-    height: 26px;
+    width: 30px;
+    height: 30px;
 }
 
 .topnav {
@@ -59,8 +59,9 @@
 }
 
 .topnav a.active {
-    color: var(--ink);
-    background: var(--surface);
+    color: var(--green-deep);
+    background: var(--green-tint);
+    font-weight: 600;
 }
 
 .topbar-actions {
@@ -80,20 +81,73 @@
 }
 
 .footer {
-    border-top: 1px solid var(--line-soft);
-    padding: var(--s5);
-    text-align: left;
-    color: var(--ink-faint);
+    margin-top: var(--s8);
+    padding: var(--s7) var(--s5) var(--s5);
     font-size: var(--fs-sm);
+    color: #b9cec4;
 }
 
 .footer-inner {
     max-width: var(--content);
     margin: 0 auto;
+    padding: 0 var(--s5);
+}
+
+.footer-cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 1fr));
+    gap: var(--s6);
+}
+
+.footer .brand {
+    color: #fff;
+}
+
+.footer h2 {
+    margin-bottom: var(--s3);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: #fff;
+}
+
+.footer-cols p {
+    margin-top: var(--s3);
+    max-width: 34ch;
+}
+
+.footer-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--s2);
+}
+
+.footer-bottom {
     display: flex;
     flex-wrap: wrap;
     justify-content: space-between;
+    align-items: center;
     gap: var(--s3);
+    margin-top: var(--s6);
+    padding-top: var(--s4);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    color: #8fac9f;
+}
+
+.footer-bottom .btn {
+    color: #d5e6dd;
+}
+
+.footer-bottom .btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+@media (max-width: 760px) {
+    .footer-cols {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 820px) {
@@ -132,6 +186,7 @@
 
 /* ---------- Staff layout: sidebar + work area ---------- */
 .shell {
+    background: linear-gradient(90deg, var(--board-deep) var(--sidebar), transparent var(--sidebar));
     display: grid;
     grid-template-columns: var(--sidebar) minmax(0, 1fr);
     min-height: 100vh;
@@ -145,7 +200,8 @@
     flex-direction: column;
     gap: var(--s5);
     padding: var(--s5) var(--s4);
-    background: var(--ink);
+    background: var(--board-deep);
+    background-image: linear-gradient(180deg, var(--board) 0%, var(--board-deep) 60%);
     color: #dfe5e2;
     overflow-y: auto;
 }
@@ -156,9 +212,19 @@
 }
 
 .sidebar-role {
-    padding: 0 var(--s2);
+    margin: 0 var(--s1);
+    padding: var(--s3);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.06);
     font-size: var(--fs-xs);
-    color: #9aa7a1;
+    line-height: 1.5;
+    color: #a9c8ba;
+}
+
+.sidebar-role strong {
+    display: block;
+    font-size: var(--fs-sm);
+    color: #fff;
 }
 
 .sidenav {
@@ -170,9 +236,9 @@
     display: flex;
     align-items: center;
     gap: var(--s3);
-    padding: var(--s2) var(--s3);
-    border-radius: var(--r-control);
-    color: #c3ccc8;
+    padding: 10px var(--s3);
+    border-radius: 10px;
+    color: #c4d8ce;
     text-decoration: none;
     font-size: var(--fs-sm);
 }
@@ -185,7 +251,12 @@
 .sidenav a.active {
     background: rgba(255, 255, 255, 0.1);
     color: #fff;
-    box-shadow: inset 3px 0 0 var(--amber);
+    font-weight: 600;
+    box-shadow: inset 3px 0 0 var(--copper-bright);
+}
+
+.sidenav a.active svg {
+    color: var(--copper-bright);
 }
 
 .sidenav svg {
@@ -213,7 +284,8 @@
 
 .workarea {
     min-width: 0;
-    padding: var(--s6) var(--s6) var(--s8);
+    padding: var(--s6) var(--s7) var(--s8);
+    background: var(--paper);
 }
 
 .shell-mobilebar {
@@ -234,7 +306,7 @@
         z-index: 20;
         height: 56px;
         padding: 0 var(--s4);
-        background: var(--ink);
+        background: var(--board);
     }
 
     .shell-mobilebar .brand {
@@ -265,4 +337,20 @@
     .workarea {
         padding: var(--s5) var(--s4) var(--s7);
     }
+}
+
+/* Keep the footer at the bottom on short pages */
+#root {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+#root > .page {
+    flex: 1;
+    width: 100%;
+}
+
+#root > .shell {
+    flex: 1;
 }
