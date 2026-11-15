@@ -74,6 +74,8 @@ function createAuthenticate({ jwt, publicKey, issuer, audience } = {}) {
                 !decoded
                 || typeof decoded !== "object"
                 || !Number.isFinite(decoded.exp)
+                // User Service marks access tokens; reject any other token type.
+                || (decoded.token_use !== undefined && decoded.token_use !== "user_access")
                 || typeof decoded.sub !== "string"
                 || decoded.sub.trim().length === 0
                 || !Array.isArray(decoded.roles)

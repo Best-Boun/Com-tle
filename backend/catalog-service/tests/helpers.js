@@ -11,7 +11,7 @@ const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
 });
 
 function signToken(userId, roles) {
-    return jwt.sign({ roles }, privateKey, {
+    return jwt.sign({ roles, token_use: "user_access" }, privateKey, {
         algorithm: "RS256",
         subject: userId,
         issuer: ISSUER,
@@ -127,6 +127,7 @@ module.exports = {
     ISSUER,
     AUDIENCE,
     publicKey,
+    privateKey,
     signToken,
     CAT_ACTIVE,
     CAT_INACTIVE,

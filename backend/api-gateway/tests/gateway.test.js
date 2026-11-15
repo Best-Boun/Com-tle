@@ -472,3 +472,70 @@ test("payment routes are proxied to Payment-Service only for mapped paths", asyn
         await new Promise((resolve) => server.close(resolve));
     }
 });
+
+test("booking and catalog routes are proxied only for mapped paths", async () => {
+    const app = createGatewayApp({
+        ...testConfig,
+        serviceUrls: {
+            user: "http://user-service.test",
+            booking: "http://booking-service.test",
+            catalog: "http://catalog-service.test"
+        }
+    }, {
+        proxyFactory: (target) => (req, res) => res.status(200).json({
+            target, method: req.method, path: req.url
+        })
+    });
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise((resolve) => server.once("listening", resolve));
+    const { port } = server.address();
+    const call = (path, method = "GET") => fetch(`http://127.0.0.1:${port}${path}`, {
+        method,
+        headers: { "content-type": "application/json" },
+        body: method === "GET" ? undefined : "{}"
+    });
+    const id = "11111111-1111-4111-8111-111111111111";
+    const booking = "http://booking-service.test";
+    const catalog = "http://catalog-service.test";
+    try {
+        for (const [path, method, target, forwarded] of [
+            ["/api/bookings/availability?date=2026-11-20", "GET", booking, "/availability?date=2026-11-20"],
+            ["/api/bookings/me", "GET", booking, "/me"],
+            ["/api/bookings?status=PENDING", "GET", booking, "/?status=PENDING"],
+            ["/api/bookings", "POST", booking, "/"],
+            [`/api/bookings/${id}`, "GET", booking, `/${id}`],
+            [`/api/bookings/${id}/confirm`, "PATCH", booking, `/${id}/confirm`],
+            [`/api/bookings/${id}/cancel`, "PATCH", booking, `/${id}/cancel`],
+            [`/api/bookings/${id}/check-in`, "POST", booking, `/${id}/check-in`],
+            ["/api/catalog/categories", "GET", catalog, "/categories"],
+            ["/api/catalog/categories", "POST", catalog, "/categories"],
+            [`/api/catalog/categories/${id}`, "PATCH", catalog, `/categories/${id}`],
+            [`/api/catalog/categories/${id}/status`, "PATCH", catalog, `/categories/${id}/status`],
+            ["/api/catalog/services?search=ssd", "GET", catalog, "/services?search=ssd"],
+            ["/api/catalog/services", "POST", catalog, "/services"],
+            [`/api/catalog/services/${id}`, "GET", catalog, `/services/${id}`],
+            [`/api/catalog/services/${id}`, "PATCH", catalog, `/services/${id}`],
+            [`/api/catalog/services/${id}/status`, "PATCH", catalog, `/services/${id}/status`],
+            ["/api/catalog/audit-logs", "GET", catalog, "/audit-logs"]
+        ]) {
+            const response = await call(path, method);
+            assert.equal(response.status, 200, `${method} ${path}`);
+            assert.deepEqual(await response.json(), { target, method, path: forwarded });
+        }
+        for (const [path, method] of [
+            ["/api/bookings/health", "GET"],
+            [`/api/bookings/${id}`, "DELETE"],
+            [`/api/bookings/${id}/no-show`, "PATCH"],
+            ["/api/bookings/not-a-uuid/confirm", "PATCH"],
+            ["/api/catalog/health", "GET"],
+            [`/api/catalog/services/${id}`, "DELETE"],
+            ["/api/catalog/audit-logs", "POST"],
+            ["/api/catalog/anything", "GET"]
+        ]) {
+            const response = await call(path, method);
+            assert.equal(response.status, 404, `${method} ${path}`);
+        }
+    } finally {
+        await new Promise((resolve) => server.close(resolve));
+    }
+});
