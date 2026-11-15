@@ -107,9 +107,24 @@ test.before(async () => {
         db,
         requestPermission: async (context, permission) =>
             (grants.get(context.userId) || []).includes(permission),
-        requestCustomerId: async (context) => customers.get(context.userId) || null
+        requestCustomerId: async (context) => customers.get(context.userId) || null,
+        loadWorkOrder: async (workOrderId) => workOrders.get(workOrderId) || null
     });
 });
+
+// Work orders as Repair-Service would return them to the checkout.
+const workOrders = new Map();
+function repairWorkOrder(customerUserId, approvedTotals, extra = {}) {
+    const workOrderId = newWorkOrderId();
+    workOrders.set(workOrderId, {
+        work_order_id: workOrderId,
+        customer_id: customerUserId,
+        status: "REPAIRING",
+        quotations: approvedTotals.map((total) => ({ status: "APPROVED", total })),
+        ...extra
+    });
+    return workOrderId;
+}
 
 test.after(async () => {
     await db?.destroy();
@@ -355,4 +370,49 @@ test("admin lists: payments, balances and refunds with filters", options, async 
 
     const refunds = await payments.listRefunds(as(ADMIN_A), { status: "COMPLETED" });
     assert.ok(refunds.items.every((row) => row.status === "COMPLETED"));
+});
+
+test("checkout: a customer pays the whole approved total and the balance updates", options, async () => {
+    const workOrderId = repairWorkOrder(CUSTOMER_USER, [1000, 200]);
+    const checkout = (actor, key = nextKey(), method = "PROMPTPAY") => payments.checkout(
+        as(actor), { work_order_id: workOrderId, payment_method: method }, key, "Bearer t"
+    );
+
+    await assert.rejects(checkout(OTHER_USER), (error) => error.statusCode === 404);
+
+    const key = nextKey();
+    const paid = await checkout(CUSTOMER_USER, key);
+    assert.equal(paid.amount, 1200);
+    assert.equal(paid.payment_method, "PROMPTPAY");
+    assert.equal(paid.outstanding_balance, 0);
+    assert.match(paid.reference_number, /^MOCK-/);
+    assert.equal((await checkout(CUSTOMER_USER, key)).replayed, true);
+
+    const balance = await payments.getBalance(as(ADMIN_A), workOrderId);
+    assert.deepEqual(
+        { total: balance.bill_total, paid: balance.paid_total, due: balance.outstanding_balance },
+        { total: 1200, paid: 1200, due: 0 }
+    );
+    await assert.rejects(checkout(CUSTOMER_USER), (error) => error.statusCode === 409);
+
+    // An extra quotation approved later re-versions the bill; only the difference is due.
+    workOrders.get(workOrderId).quotations.push({ status: "APPROVED", total: 300 });
+    const extra = await checkout(CUSTOMER_USER, nextKey(), "CARD");
+    assert.deepEqual({ amount: extra.amount, version: extra.bill_version }, { amount: 300, version: 2 });
+});
+
+test("checkout: refuses cancelled, unapproved and locked work orders", options, async () => {
+    const checkout = (workOrderId) => payments.checkout(
+        as(CUSTOMER_USER), { work_order_id: workOrderId, payment_method: "CARD" }, nextKey(), "Bearer t"
+    );
+    await assert.rejects(checkout(repairWorkOrder(CUSTOMER_USER, [])), (error) => error.statusCode === 409);
+    await assert.rejects(
+        checkout(repairWorkOrder(CUSTOMER_USER, [500], { status: "CANCELLED" })),
+        (error) => error.statusCode === 409
+    );
+
+    const locked = repairWorkOrder(CUSTOMER_USER, [500]);
+    await issueBill(locked, 500);
+    await payments.lockWorkOrderPayments(as(ADMIN_A), locked, { reason: "dispute" });
+    await assert.rejects(checkout(locked), (error) => error.statusCode === 423);
 });

@@ -15,6 +15,10 @@ const THAI = {
     "Payment exceeds the outstanding balance": "ยอดเกินยอดค้างชำระ",
     "No issued bill for this work order": "ยังไม่มีบิลสำหรับใบงานนี้",
     "Payments for this work order are locked": "ใบงานนี้ถูกล็อกการรับชำระไว้",
+    "This work order is already paid": "ใบงานนี้ชำระครบแล้ว",
+    "There is no approved quotation yet": "ยังไม่มีใบเสนอราคาที่อนุมัติ",
+    "Work order is cancelled": "ใบงานถูกยกเลิกแล้ว",
+    "Repair Service is unavailable": "ระบบใบงานซ่อมไม่พร้อมใช้งาน",
     "Refund exceeds the refundable amount of the payment": "ยอดคืนเกินยอดที่คืนได้",
     "A refund must be approved by someone other than the requester": "ผู้อนุมัติต้องไม่ใช่ผู้ขอคืนเงิน",
     "A refund must be executed by someone other than the requester": "ผู้ดำเนินการคืนเงินต้องไม่ใช่ผู้ขอคืนเงิน",
@@ -295,6 +299,20 @@ export const payments = {
         for (const [paymentId, take] of plan) {
             await payments.requestRefund(paymentId, { amount: take, reason: note });
         }
+        return refreshedWorkOrder(woId);
+    },
+
+    /**
+     * Customer online checkout (mock provider): pays the whole outstanding
+     * balance of the approved quotations. Payment-Service works out the amount
+     * itself. Returns the refreshed work order.
+     */
+    async checkout(woId, { method }) {
+        await request("/payments/checkout", {
+            method: "POST",
+            idempotent: true,
+            body: { work_order_id: woId, payment_method: method }
+        });
         return refreshedWorkOrder(woId);
     },
 

@@ -13,7 +13,8 @@ async function withApp(run) {
     const paymentService = Object.fromEntries([
         "registerBill", "recordPayment", "voidPayment", "getBalance", "listPayments",
         "listBalances", "listMyPayments", "requestRefund", "approveRefund", "rejectRefund",
-        "executeRefund", "listRefunds", "lockWorkOrderPayments", "unlockWorkOrderPayments"
+        "executeRefund", "listRefunds", "lockWorkOrderPayments", "unlockWorkOrderPayments",
+        "checkout"
     ].map((name) => [name, record(name)]));
     paymentService.approveRefund = async () => {
         throw new AppError("A refund must be approved by someone other than the requester", 403);
@@ -63,6 +64,21 @@ test("routes pass the verified actor, body, params and Idempotency-Key to the se
             { userId: "admin-1" },
             { work_order_id: "wo-1", amount: 100, payment_method: "CASH" },
             "key-12345678"
+        ]);
+
+        const checkout = await call("/checkout", {
+            method: "POST",
+            body: { work_order_id: "wo-1", payment_method: "PROMPTPAY" },
+            headers: { "idempotency-key": "key-87654321" }
+        });
+        assert.equal(checkout.status, 201);
+        // The caller's own token is forwarded so Repair-Service checks ownership.
+        assert.deepEqual(calls.at(-1), [
+            "checkout",
+            { userId: "admin-1" },
+            { work_order_id: "wo-1", payment_method: "PROMPTPAY" },
+            "key-87654321",
+            "Bearer good"
         ]);
 
         for (const [path, method, name, extra] of [

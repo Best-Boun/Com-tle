@@ -978,6 +978,19 @@ export const payments = {
         return respond(presentWo(wo, { detail: true }));
     }),
 
+    /** Customer online checkout (mock provider): pays the whole outstanding balance. */
+    checkout: handler(async (woId, { method }) => {
+        const user = requireRole("CUSTOMER");
+        const wo = loadWo(woId, user);
+        if (wo.status === "CANCELLED") throw bad("ใบงานถูกยกเลิกแล้ว", "Work order is cancelled", 409);
+        if (!["PROMPTPAY", "CARD"].includes(method)) throw bad("เลือกวิธีชำระเงิน", "Choose a payment method");
+        const sum = paymentSummary(woId);
+        if (sum.due === 0) throw bad("ยังไม่มีใบเสนอราคาที่อนุมัติ", "There is no approved quotation yet", 409);
+        if (sum.balance <= 0) throw bad("ใบงานนี้ชำระครบแล้ว", "This work order is already paid", 409);
+        getDb().payments.push({ payment_id: newId(), work_order_id: woId, type: "PAYMENT", amount: sum.balance, method, recorded_by: user.user_id, note: `MOCK-${newId().slice(0, 8).toUpperCase()}`, created_at: now() });
+        return respond(presentWo(wo, { detail: true }));
+    }),
+
     refund: handler(async (woId, { amount, note }) => {
         const user = requireRole("ADMIN");
         const wo = loadWo(woId, user);

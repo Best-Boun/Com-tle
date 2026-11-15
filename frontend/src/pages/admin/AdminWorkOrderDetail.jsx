@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useI18n } from "../../i18n/I18nProvider.jsx";
 import { api } from "../../api/index.js";
@@ -9,6 +9,7 @@ import ItemsEditor, { itemsValid, toPayload } from "../../components/ItemsEditor
 import "./admin.css";
 
 const OPEN = ["PENDING", "DIAGNOSING", "WAITING_APPROVAL", "APPROVED", "REPAIRING", "TESTING"];
+const PAYMENT_POLL_MS = 8000;
 
 /** Admin prices a technician's draft and sends it to the customer. */
 function PriceDraft({ draft, parts, busy, onSend }) {
@@ -58,6 +59,23 @@ export default function AdminWorkOrderDetail() {
         }
         return updated;
     }
+
+    // Customers can pay online, so while money is still due keep the payment
+    // box fresh. Only payment fields are replaced: forms on the page stay as typed.
+    const latest = useRef(wo.data);
+    latest.current = wo.data;
+    const awaitingPayment = Boolean(wo.data && wo.data.payment.balance > 0 && wo.data.status !== "CANCELLED");
+    useEffect(() => {
+        if (!awaitingPayment || modal) return undefined;
+        const timer = setInterval(async () => {
+            if (document.hidden) return;
+            const fresh = await api.repairs.get(workOrderId).catch(() => null);
+            const current = latest.current;
+            if (!fresh || !current || fresh.payment.paid === current.payment.paid) return;
+            wo.setData({ ...current, payment: fresh.payment, payments: fresh.payments });
+        }, PAYMENT_POLL_MS);
+        return () => clearInterval(timer);
+    }, [awaitingPayment, modal, workOrderId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     if (wo.loading && !wo.data) return <Loading />;
     if (wo.error) return <ErrorNotice error={wo.error} onRetry={wo.reload} />;
