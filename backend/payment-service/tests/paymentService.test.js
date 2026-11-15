@@ -99,6 +99,60 @@ test("POST payment and refund require a well-formed Idempotency-Key", async () =
     );
 });
 
+test("checkout: permission, input and ownership are checked before the database", async () => {
+    const customer = { userId: "user-c1" };
+    const valid = { work_order_id: "wo-1", payment_method: "PROMPTPAY" };
+    const owned = { work_order_id: "wo-1", customer_id: "user-c1", status: "REPAIRING", quotations: [] };
+    const make = (overrides = {}) => createPaymentService({
+        db: untouchableDb(),
+        requestPermission: async (_context, permission) => permission === "payment.view_own",
+        requestCustomerId: async () => "cust-1",
+        loadWorkOrder: async () => owned,
+        ...overrides
+    });
+
+    await assert.rejects(make().checkout({}, valid, "key-12345", "Bearer t"), (e) => e.statusCode === 401);
+    await assert.rejects(
+        make({ requestPermission: async () => false }).checkout(customer, valid, "key-12345", "Bearer t"),
+        (e) => e.statusCode === 403
+    );
+    for (const input of [
+        { ...valid, payment_method: "CASH" },
+        { ...valid, amount: 1 },
+        { payment_method: "CARD" }
+    ]) {
+        await assert.rejects(make().checkout(customer, input, "key-12345", "Bearer t"), (e) => e.statusCode === 400);
+    }
+    await assert.rejects(
+        make({ requestCustomerId: async () => null }).checkout(customer, valid, "key-12345", "Bearer t"),
+        (e) => e.statusCode === 403
+    );
+    await assert.rejects(
+        make({ loadWorkOrder: async () => ({ ...owned, customer_id: "someone-else" }) })
+            .checkout(customer, valid, "key-12345", "Bearer t"),
+        (e) => e.statusCode === 404
+    );
+    await assert.rejects(
+        make({ loadWorkOrder: async () => ({ ...owned, status: "CANCELLED" }) })
+            .checkout(customer, valid, "key-12345", "Bearer t"),
+        (e) => e.statusCode === 409
+    );
+    await assert.rejects(
+        make({ loadWorkOrder: async () => ({ ...owned, quotations: [{ status: "SENT", total: 500 }] }) })
+            .checkout(customer, valid, "key-12345", "Bearer t"),
+        (e) => e.statusCode === 409 && /approved quotation/.test(e.message)
+    );
+    await assert.rejects(
+        make({ loadWorkOrder: async () => { throw new Error("ECONNREFUSED"); } })
+            .checkout(customer, valid, "key-12345", "Bearer t"),
+        (e) => e.statusCode === 503
+    );
+    await assert.rejects(
+        make({ loadWorkOrder: null }).checkout(customer, valid, "key-12345", "Bearer t"),
+        (e) => e.statusCode === 503
+    );
+});
+
 test("database and dependency failures surface as 503 without internal details", async () => {
     const brokenDb = () => {
         throw new Error("connect ECONNREFUSED secret-host:3306");

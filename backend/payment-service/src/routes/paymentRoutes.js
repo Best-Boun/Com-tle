@@ -13,6 +13,8 @@ const { successResponse } = require("../../../shared/utils/responseFormatter");
 //   POST /refunds/:refundId/approve|reject|execute
 //   POST /work-orders/:workOrderId/lock|unlock   stop or allow new payments (reason)
 //   GET  /my                       the caller's own bills and payments
+//   POST /checkout                 customer pays an approved quotation online
+//                                  (mock provider, Idempotency-Key)
 function createPaymentRouter({ paymentService, requireUserAuth }) {
     if (!paymentService || typeof requireUserAuth !== "function") {
         throw new Error("Payment service and user authentication are required");
@@ -43,6 +45,8 @@ function createPaymentRouter({ paymentService, requireUserAuth }) {
         (req) => paymentService.lockWorkOrderPayments(req.auth, req.params.workOrderId, req.body)));
     router.post("/work-orders/:workOrderId/unlock", handle(200, "Payments unlocked",
         (req) => paymentService.unlockWorkOrderPayments(req.auth, req.params.workOrderId, req.body)));
+    router.post("/checkout", handle(201, "Payment completed",
+        (req) => paymentService.checkout(req.auth, req.body, key(req), req.get("authorization"))));
     router.get("/my", handle(200, "My payments",
         (req) => paymentService.listMyPayments(req.auth)));
     router.post("/refunds", handle(201, "Refund requested",

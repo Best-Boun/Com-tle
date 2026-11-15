@@ -41,6 +41,7 @@ export const DICT = {
         "pay.method.CASH": "เงินสด",
         "pay.method.TRANSFER": "โอนเงิน",
         "pay.method.CARD": "บัตร",
+        "pay.method.PROMPTPAY": "พร้อมเพย์",
         "pay.type.PAYMENT": "รับชำระ",
         "pay.type.REFUND": "คืนเงิน",
 
@@ -103,6 +104,7 @@ export const DICT = {
         "pay.method.CASH": "Cash",
         "pay.method.TRANSFER": "Bank transfer",
         "pay.method.CARD": "Card",
+        "pay.method.PROMPTPAY": "PromptPay",
         "pay.type.PAYMENT": "Payment",
         "pay.type.REFUND": "Refund",
 
