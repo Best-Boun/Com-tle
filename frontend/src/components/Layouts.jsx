@@ -90,15 +90,37 @@ function Footer() {
         window.location.reload();
     }
     return (
-        <footer className="footer">
+        <footer className="footer board-surface">
             <div className="footer-inner">
-                <span>SmartFix · {L("ร้านซ่อมคอมพิวเตอร์ เปิด 09:00–17:00 ทุกวัน", "Computer repair, open daily 09:00–17:00")}</span>
-                <span>
-                    {USING_MOCK
-                        ? L("ตอนนี้ใช้ข้อมูลตัวอย่าง (ยังไม่ต่อ API)", "Using demo data (API not connected yet)")
-                        : L("บัญชีและโปรไฟล์ใช้ API จริง ส่วนอื่นยังเป็นข้อมูลตัวอย่าง", "Accounts and profile use the real API; other pages use demo data")}{" "}
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={reset}>{L("รีเซ็ตข้อมูลตัวอย่าง", "Reset demo data")}</button>
-                </span>
+                <div className="footer-cols">
+                    <div>
+                        <Link to="/" className="brand"><BrandMark light />SmartFix</Link>
+                        <p>{L("ร้านซ่อมโน้ตบุ๊กและคอมพิวเตอร์ ตรวจเช็กก่อน แจ้งราคาก่อน แล้วค่อยซ่อม", "Laptop and computer repair. We check first, quote first, then repair.")}</p>
+                    </div>
+                    <div>
+                        <h2>{L("ติดต่อร้าน", "Contact")}</h2>
+                        <ul className="footer-list">
+                            <li>{L("123 ถ.พหลโยธิน แขวงจตุจักร กรุงเทพฯ 10900", "123 Phahonyothin Rd, Chatuchak, Bangkok 10900")}</li>
+                            <li><a href="tel:021234567">02-123-4567</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h2>{L("เวลาเปิด", "Opening hours")}</h2>
+                        <ul className="footer-list">
+                            <li>{L("ทุกวัน 09:00–17:00", "Daily 09:00–17:00")}</li>
+                            <li>{L("พักเที่ยง 12:00–13:00", "Lunch 12:00–13:00")}</li>
+                        </ul>
+                    </div>
+                </div>
+                <div className="footer-bottom">
+                    <span>© SmartFix</span>
+                    <span>
+                        {USING_MOCK
+                            ? L("ตอนนี้ใช้ข้อมูลตัวอย่าง", "Running on demo data")
+                            : L("เชื่อมต่อ API จริง", "Connected to the real API")}{" "}
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={reset}>{L("รีเซ็ตข้อมูลตัวอย่าง", "Reset demo data")}</button>
+                    </span>
+                </div>
             </div>
         </footer>
     );
@@ -143,7 +165,7 @@ export function StaffLayout() {
             </div>
             <aside className={`sidebar ${open ? "open" : ""}`}>
                 <Link to={homeFor(role)} className="brand"><BrandMark light />SmartFix</Link>
-                <div className="sidebar-role">{user?.full_name} · {t(`role.${role}`)}</div>
+                <div className="sidebar-role"><strong>{user?.full_name}</strong>{t(`role.${role}`)}</div>
                 <nav className="sidenav" aria-label={L("เมนูพนักงาน", "Staff")}>
                     {(STAFF_NAV[role] || []).map((item) => (
                         <NavLink key={item.to} to={item.to} end={item.end}>

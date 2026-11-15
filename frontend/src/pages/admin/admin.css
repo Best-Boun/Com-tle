@@ -1,3 +1,76 @@
+/* Dashboard KPI tiles */
+.kpi-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--s4);
+}
+
+.kpi {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    column-gap: var(--s3);
+    align-items: center;
+    padding: var(--s4) var(--s5);
+    background: var(--surface);
+    border: 1px solid var(--line-soft);
+    border-radius: 14px;
+}
+
+.kpi-icon {
+    grid-row: span 2;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: var(--green-tint);
+    color: var(--green-deep);
+}
+
+.kpi-icon svg {
+    width: 22px;
+    height: 22px;
+}
+
+.kpi-label {
+    font-size: var(--fs-sm);
+    color: var(--ink-soft);
+}
+
+.kpi strong {
+    font-size: var(--fs-2xl);
+    font-weight: 700;
+    line-height: 1.15;
+}
+
+.kpi-money {
+    background: var(--board);
+    border-color: var(--board);
+    color: #fff;
+}
+
+.kpi-money .kpi-label {
+    color: #a9c8ba;
+}
+
+.kpi-money .kpi-icon {
+    background: rgba(228, 146, 74, 0.18);
+    color: var(--copper-bright);
+}
+
+@media (max-width: 1100px) {
+    .kpi-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 520px) {
+    .kpi-row {
+        grid-template-columns: 1fr;
+    }
+}
+
 .dash-grid {
     display: grid;
     grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
@@ -16,7 +89,8 @@
     margin: 0;
     padding: 0;
     border: 1px solid var(--line-soft);
-    border-radius: var(--r-panel);
+    border-radius: 14px;
+    overflow: hidden;
     background: var(--surface);
 }
 
@@ -50,7 +124,11 @@
 }
 
 .todo-list li.has .todo-count {
-    color: #b67800;
+    color: var(--copper);
+}
+
+.todo-list li.has a {
+    box-shadow: inset 3px 0 0 var(--copper);
 }
 
 .glance {
@@ -63,7 +141,8 @@
 
 .status-bars {
     display: grid;
-    gap: var(--s2);
+    gap: var(--s3);
+    border-radius: 14px;
 }
 
 .status-bar {
@@ -75,7 +154,7 @@
 
 .bar {
     height: 8px;
-    border-radius: 4px;
+    border-radius: 999px;
     background: var(--grey-tint);
     overflow: hidden;
 }

@@ -7,7 +7,7 @@
     min-height: 40px;
     padding: 0 var(--s4);
     border: 1px solid transparent;
-    border-radius: var(--r-control);
+    border-radius: 8px;
     font-weight: 500;
     font-size: var(--fs-sm);
     text-decoration: none;
@@ -24,10 +24,34 @@
 .btn-primary {
     background: var(--green);
     color: #fff;
+    font-weight: 600;
 }
 
 .btn-primary:hover:not(:disabled) {
     background: var(--green-deep);
+    color: #fff;
+}
+
+/* Copper call-to-action, used on the dark board surfaces */
+.btn-copper {
+    background: var(--copper);
+    color: #fff;
+    font-weight: 600;
+}
+
+.btn-copper:hover:not(:disabled) {
+    background: #b0611c;
+    color: #fff;
+}
+
+.btn-onboard {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.28);
+    color: #fff;
+}
+
+.btn-onboard:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
     color: #fff;
 }
 
@@ -226,15 +250,17 @@
 
 .table th {
     text-align: left;
-    font-weight: 500;
-    color: var(--ink-faint);
+    font-weight: 600;
+    font-size: var(--fs-xs);
+    color: var(--ink-soft);
+    background: #f6f8f7;
     padding: var(--s3) var(--s4);
     border-bottom: 1px solid var(--line);
     white-space: nowrap;
 }
 
 .table td {
-    padding: var(--s3) var(--s4);
+    padding: 14px var(--s4);
     border-bottom: 1px solid var(--line-soft);
     vertical-align: middle;
 }
@@ -406,7 +432,11 @@
     justify-content: space-between;
     align-items: end;
     gap: var(--s4);
-    margin-bottom: var(--s5);
+    margin-bottom: var(--s6);
+}
+
+.page-head h1 {
+    font-size: var(--fs-2xl);
 }
 
 .page-head p {
@@ -607,4 +637,82 @@
 .table td.num > a,
 .table td .num {
     white-space: nowrap;
+}
+
+/* ---------------- Online checkout (mock) ---------------- */
+.checkout-total {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--s3);
+    padding: var(--s3) var(--s4);
+    background: var(--paper);
+    border-radius: var(--r-control);
+}
+.checkout-total strong { font-size: var(--fs-xl); }
+.checkout-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s2);
+}
+.checkout-tab {
+    padding: var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    cursor: pointer;
+}
+.checkout-tab.is-active {
+    border-color: var(--green);
+    background: var(--green-tint);
+    color: var(--green-deep);
+    font-weight: 600;
+}
+.checkout-tab:focus-visible { outline: none; box-shadow: var(--focus); }
+.checkout-qr {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--s3);
+    padding: var(--s4);
+    border: 1px dashed var(--line);
+    border-radius: var(--r-panel);
+    text-align: center;
+}
+.checkout-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s3);
+}
+.checkout-done { align-items: center; }
+.checkout-check {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--green-tint);
+    color: var(--green);
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0 auto;
+}
+.checkout-amount {
+    text-align: center;
+    font-size: var(--fs-2xl);
+    font-weight: 700;
+    margin: 0;
+}
+.pay-cta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+    flex-wrap: wrap;
+}
+
+.stack-lg > .page-head {
+    margin-bottom: 0;
 }

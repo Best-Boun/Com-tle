@@ -1,0 +1,20 @@
+/* ---------- Circuit board surface (hero, auth panel, footer) ---------- */
+.board-surface {
+    position: relative;
+    background-color: var(--board);
+    background-image:
+        radial-gradient(120% 90% at 85% 10%, rgba(18, 128, 91, 0.55), transparent 60%),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220' viewBox='0 0 220 220'%3E%3Cg fill='none' stroke='%237cd6aa' stroke-opacity='.14' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M0 40h60l20 20h60l20-20h60'/%3E%3Cpath d='M30 0v20l20 20'/%3E%3Cpath d='M0 120h30l20-20h40'/%3E%3Cpath d='M90 100v40l20 20h110'/%3E%3Cpath d='M150 220v-30l-20-20'/%3E%3Cpath d='M0 190h50l20-20v-40'/%3E%3Cpath d='M190 0v60l-20 20v40'/%3E%3Cpath d='M110 60v20'/%3E%3C/g%3E%3Cg fill='%23e4924a' fill-opacity='.28'%3E%3Ccircle cx='60' cy='40' r='4'/%3E%3Ccircle cx='160' cy='40' r='4'/%3E%3Ccircle cx='90' cy='100' r='4'/%3E%3Ccircle cx='130' cy='170' r='4'/%3E%3Ccircle cx='70' cy='130' r='4'/%3E%3Ccircle cx='170' cy='120' r='4'/%3E%3Ccircle cx='110' cy='80' r='4'/%3E%3C/g%3E%3Cg fill='none' stroke='%237cd6aa' stroke-opacity='.18' stroke-width='2'%3E%3Ccircle cx='50' cy='40' r='0'/%3E%3Crect x='176' y='146' width='28' height='18' rx='2'/%3E%3C/g%3E%3C/svg%3E");
+    background-size: auto, 220px 220px;
+    color: #e7f2ec;
+}
+
+.board-surface a:not(.btn):not(.brand) {
+    color: #ffd2a8;
+}
+
+/* Full-bleed band inside the centered .page column */
+.bleed {
+    margin-inline: calc(50% - 50vw);
+    padding-inline: max(var(--s5), calc(50vw - var(--content) / 2 + var(--s5)));
+}
