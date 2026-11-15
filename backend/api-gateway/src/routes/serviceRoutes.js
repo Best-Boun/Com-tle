@@ -36,6 +36,7 @@ const paymentRoutePatterns = [
     ["POST", /^\/bills$/],
     ["GET", /^\/balances(?:\/[^/]+)?$/],
     ["GET", /^\/my$/],
+    ["POST", /^\/checkout$/],
     ["POST", /^\/work-orders\/[^/]+\/(?:lock|unlock)$/],
     ["POST", /^\/refunds$/],
     ["GET", /^\/refunds$/],
