@@ -1,0 +1,9 @@
+{
+  "name": "smartfix-backend",
+  "private": true,
+  "description": "Runs the SmartFix backend services locally. Each service has its own package.json.",
+  "scripts": {
+    "dev": "node dev.js",
+    "install:all": "node -e \"for (const d of ['api-gateway','user-service','payment-service','booking-service','catalog-service','repair-service','inventory-service']) require('child_process').execSync('npm install', { cwd: d, stdio: 'inherit' })\""
+  }
+}
