@@ -495,6 +495,7 @@ test("payment routes are proxied to Payment-Service only for mapped paths", asyn
             ["/api/payments/balances", "GET", "/balances"],
             ["/api/payments/balances/wo-1", "GET", "/balances/wo-1"],
             ["/api/payments/my", "GET", "/my"],
+            ["/api/payments/checkout", "POST", "/checkout"],
             ["/api/payments/work-orders/wo-1/lock", "POST", "/work-orders/wo-1/lock"],
             ["/api/payments/work-orders/wo-1/unlock", "POST", "/work-orders/wo-1/unlock"],
             ["/api/payments/refunds", "POST", "/refunds"],

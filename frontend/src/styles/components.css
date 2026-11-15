@@ -608,3 +608,77 @@
 .table td .num {
     white-space: nowrap;
 }
+
+/* ---------------- Online checkout (mock) ---------------- */
+.checkout-total {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--s3);
+    padding: var(--s3) var(--s4);
+    background: var(--paper);
+    border-radius: var(--r-control);
+}
+.checkout-total strong { font-size: var(--fs-xl); }
+.checkout-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s2);
+}
+.checkout-tab {
+    padding: var(--s3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    cursor: pointer;
+}
+.checkout-tab.is-active {
+    border-color: var(--green);
+    background: var(--green-tint);
+    color: var(--green-deep);
+    font-weight: 600;
+}
+.checkout-tab:focus-visible { outline: none; box-shadow: var(--focus); }
+.checkout-qr {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--s3);
+    padding: var(--s4);
+    border: 1px dashed var(--line);
+    border-radius: var(--r-panel);
+    text-align: center;
+}
+.checkout-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s3);
+}
+.checkout-done { align-items: center; }
+.checkout-check {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--green-tint);
+    color: var(--green);
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0 auto;
+}
+.checkout-amount {
+    text-align: center;
+    font-size: var(--fs-2xl);
+    font-weight: 700;
+    margin: 0;
+}
+.pay-cta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s3);
+    flex-wrap: wrap;
+}
