@@ -5,6 +5,7 @@ import { api } from "../../api/index.js";
 import { useAsync } from "../../utils/useAsync.js";
 import { ErrorNotice, Loading, Modal, Money, Stamp, TextField, useAction } from "../../components/ui.jsx";
 import { PaymentSummary, QuotationCard, RepairProgress, WoHistory, deviceLabel } from "../../components/repair.jsx";
+import Checkout from "../../components/Checkout.jsx";
 
 export default function RepairDetail() {
     const { workOrderId } = useParams();
@@ -12,6 +13,7 @@ export default function RepairDetail() {
     const wo = useAsync(() => api.repairs.get(workOrderId), [workOrderId]);
     const [rejecting, setRejecting] = useState(null);
     const [note, setNote] = useState("");
+    const [paying, setPaying] = useState(false);
     const [run, busy] = useAction();
 
     async function decide(quotation, approve) {
@@ -29,6 +31,7 @@ export default function RepairDetail() {
     const w = wo.data;
     const pending = w.quotations.filter((q) => q.status === "SENT");
     const shownStatus = w.handed_over_at ? "HANDED_OVER" : w.status;
+    const canPayOnline = w.status !== "CANCELLED" && w.payment.balance > 0;
 
     return (
         <div className="stack-lg">
@@ -55,6 +58,12 @@ export default function RepairDetail() {
                     {w.payment.balance > 0
                         ? L(`ซ่อมเสร็จและทดสอบแล้ว ชำระยอดค้าง ${fmt.money(w.payment.balance)} แล้วมารับเครื่องได้เลย`, `Repair done and tested. Pay the remaining ${fmt.money(w.payment.balance)} and pick up your device.`)
                         : L("ซ่อมเสร็จและทดสอบแล้ว มารับเครื่องได้ที่ร้าน", "Repair done and tested — ready for pick-up.")}
+                </div>
+            )}
+            {canPayOnline && pending.length === 0 && (
+                <div className="notice info pay-cta" role="status">
+                    <span>{L(`ใบเสนอราคาอนุมัติแล้ว ยอดที่ต้องชำระ ${fmt.money(w.payment.balance)} ชำระออนไลน์ได้เลย`, `Quotation approved. ${fmt.money(w.payment.balance)} is due — you can pay online now.`)}</span>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={() => setPaying(true)}>{L("ชำระเงิน", "Pay now")}</button>
                 </div>
             )}
             {w.status === "CANCELLED" && <div className="notice error">{L("งานนี้ถูกยกเลิก", "This repair was cancelled")}{w.cancellation?.reason ? ` — ${w.cancellation.reason}` : ""}</div>}
@@ -107,7 +116,12 @@ export default function RepairDetail() {
                                 ))}
                             </ul>
                         )}
-                        <p className="small faint">{L("ชำระที่ร้านได้ทั้งเงินสด โอน และบัตร แบ่งชำระได้", "Pay at the shop by cash, transfer or card. Part payments are fine.")}</p>
+                        {canPayOnline && (
+                            <button type="button" className="btn btn-primary" onClick={() => setPaying(true)}>
+                                {L("ชำระเงินออนไลน์", "Pay online")} <Money value={w.payment.balance} />
+                            </button>
+                        )}
+                        <p className="small faint">{L("ชำระออนไลน์ด้วยพร้อมเพย์หรือบัตร หรือชำระที่ร้านด้วยเงินสด โอน และบัตร", "Pay online by PromptPay or card, or at the shop by cash, transfer or card.")}</p>
                     </section>
                     <section className="stack">
                         <h3>{L("ความคืบหน้า", "Updates")}</h3>
@@ -115,6 +129,10 @@ export default function RepairDetail() {
                     </section>
                 </aside>
             </div>
+
+            {paying && (
+                <Checkout workOrder={w} onClose={() => setPaying(false)} onPaid={(updated) => wo.setData(updated)} />
+            )}
 
             {rejecting && (
                 <Modal

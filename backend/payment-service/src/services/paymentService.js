@@ -19,6 +19,10 @@ const PERMISSIONS = Object.freeze({
     VIEW_OWN: "payment.view_own"
 });
 const PAYMENT_METHODS = ["CASH", "TRANSFER", "CARD"];
+// Methods a customer can pick in the online (mock) checkout. There is no real
+// payment provider yet: a checkout succeeds immediately.
+const CHECKOUT_METHODS = ["PROMPTPAY", "CARD"];
+const LISTED_METHODS = [...new Set([...PAYMENT_METHODS, ...CHECKOUT_METHODS])];
 const CURRENCY = "THB";
 const BILL_EVENT = "repair.bill.issued";
 const ACTIVE_REFUND_STATUSES = ["REQUESTED", "APPROVED", "PROCESSING", "COMPLETED"];
@@ -46,6 +50,10 @@ const paymentSchema = z.object({
     payment_method: z.enum(PAYMENT_METHODS),
     reference_number: z.string().trim().min(1).max(100).optional()
 }).strict();
+const checkoutSchema = z.object({
+    work_order_id: id,
+    payment_method: z.enum(CHECKOUT_METHODS)
+}).strict();
 const voidSchema = z.object({ reason }).strict();
 const refundSchema = z.object({ payment_id: id, amount, reason }).strict();
 const rejectSchema = z.object({ reason }).strict();
@@ -58,7 +66,7 @@ const paymentListSchema = z.object({
     ...pageFields,
     work_order_id: id.optional(),
     status: z.enum(["PENDING", "SUCCEEDED", "FAILED", "VOIDED"]).optional(),
-    payment_method: z.enum(PAYMENT_METHODS).optional()
+    payment_method: z.enum(LISTED_METHODS).optional()
 }).strict();
 const refundListSchema = z.object({
     ...pageFields,
@@ -133,6 +141,7 @@ function createPaymentService({
     db,
     requestPermission,
     requestCustomerId,
+    loadWorkOrder = null,
     createId = randomUUID,
     now = Date.now
 } = {}) {
@@ -404,54 +413,165 @@ function createPaymentService({
             if (request.amount > balance.outstanding_balance) {
                 throw new AppError("Payment exceeds the outstanding balance", 409);
             }
+            return writePayment(trx, {
+                bill,
+                outstanding: balance.outstanding_balance,
+                amount: request.amount,
+                method: request.payment_method,
+                reference: request.reference_number,
+                actor,
+                action: "payment.recorded"
+            });
+        }), "Payment recording unavailable");
+    }
 
-            const paymentId = createId();
-            const paidAt = new Date(now());
-            const row = {
+    // Inserts a SUCCEEDED payment with its audit row and outbox event.
+    async function writePayment(trx, { bill, outstanding, amount: paid, method, reference, actor, action }) {
+        const paymentId = createId();
+        const paidAt = new Date(now());
+        const row = {
+            payment_id: paymentId,
+            work_order_id: bill.work_order_id,
+            bill_id: bill.bill_id,
+            bill_version: bill.bill_version,
+            amount: paid,
+            currency: CURRENCY,
+            payment_method: method,
+            status: "SUCCEEDED",
+            reference_number: reference || null,
+            recorded_by: actor,
+            paid_at: paidAt,
+            created_at: paidAt,
+            updated_at: paidAt
+        };
+        await trx("payments").insert(row);
+        await audit(trx, {
+            paymentId, actor, action,
+            metadata: { amount: paid, payment_method: method }
+        });
+        await outbox(trx, {
+            paymentId,
+            type: "payment.succeeded",
+            payload: {
                 payment_id: paymentId,
                 work_order_id: bill.work_order_id,
                 bill_id: bill.bill_id,
                 bill_version: bill.bill_version,
-                amount: request.amount,
+                amount: paid,
                 currency: CURRENCY,
-                payment_method: request.payment_method,
-                status: "SUCCEEDED",
-                reference_number: request.reference_number || null,
-                recorded_by: actor,
-                paid_at: paidAt,
-                created_at: paidAt,
-                updated_at: paidAt
-            };
-            await trx("payments").insert(row);
-            await audit(trx, {
-                paymentId, actor, action: "payment.recorded",
-                metadata: { amount: request.amount, payment_method: request.payment_method }
+                outstanding_balance: outstanding - paid
+            }
+        });
+        return {
+            resource_type: "payment",
+            resource_id: paymentId,
+            body: {
+                ...row,
+                paid_at: paidAt.toISOString(),
+                created_at: paidAt.toISOString(),
+                updated_at: undefined,
+                outstanding_balance: outstanding - paid
+            }
+        };
+    }
+
+    // ---- customer online checkout (mock provider) ---------------------------
+    // The customer pays the whole outstanding amount of an approved quotation.
+    // The amount is never taken from the client: it comes from the work order
+    // in Repair-Service, read with the customer's own token, so Repair-Service
+    // also enforces that the work order belongs to the caller. The bill is
+    // registered (or re-versioned) here when the approved total changed.
+
+    function approvedTotalOf(workOrder) {
+        return (workOrder?.quotations || [])
+            .filter((quotation) => quotation.status === "APPROVED")
+            .reduce((sum, quotation) => sum + Number(quotation.total || 0), 0);
+    }
+
+    async function fetchWorkOrder(workOrderId, authorization) {
+        if (typeof loadWorkOrder !== "function") {
+            throw new AppError("Repair Service is unavailable", 503);
+        }
+        try {
+            return await loadWorkOrder(workOrderId, authorization);
+        } catch (error) {
+            if (error instanceof AppError) {
+                throw error;
+            }
+            throw new AppError("Repair Service is unavailable", 503);
+        }
+    }
+
+    async function checkout(authContext, input, idempotencyKey, authorization) {
+        const actor = actorOf(authContext);
+        const request = parse(checkoutSchema, input, "Invalid checkout details");
+        if (!await hasPermission(authContext, PERMISSIONS.VIEW_OWN,
+            { work_order_id: request.work_order_id })) {
+            throw new AppError("Not authorized for this payment operation", 403);
+        }
+        const customerId = await resolveCustomerId(authContext);
+        if (!customerId) {
+            throw new AppError("Not authorized for this payment operation", 403);
+        }
+        const workOrder = await fetchWorkOrder(request.work_order_id, authorization);
+        if (!workOrder || workOrder.work_order_id !== request.work_order_id
+            || workOrder.customer_id !== actor) {
+            throw new AppError("Work order not found", 404);
+        }
+        if (workOrder.status === "CANCELLED") {
+            throw new AppError("Work order is cancelled", 409);
+        }
+        const total = approvedTotalOf(workOrder);
+        if (!Number.isSafeInteger(total) || total <= 0) {
+            throw new AppError("There is no approved quotation yet", 409);
+        }
+
+        return run(() => idempotent(actor, "payment.checkout", idempotencyKey, request, async (trx) => {
+            const lock = await lockWorkOrder(trx, request.work_order_id);
+            if (lock.is_locked) {
+                throw new AppError("Payments for this work order are locked", 423);
+            }
+            let bill = await latestBill(trx, request.work_order_id);
+            if (bill && bill.customer_id !== customerId) {
+                throw new AppError("Bill customer does not match the work order", 409);
+            }
+            if (!bill || bill.total_amount !== total) {
+                const next = {
+                    work_order_id: request.work_order_id,
+                    bill_id: request.work_order_id,
+                    bill_version: (bill?.bill_version || 0) + 1,
+                    customer_id: customerId,
+                    total_amount: total,
+                    currency: CURRENCY
+                };
+                const receivedAt = new Date(now());
+                await trx("inbox_events").insert({
+                    inbox_id: createId(),
+                    source_service: "checkout",
+                    source_event_id: createId(),
+                    event_type: BILL_EVENT,
+                    work_order_id: next.work_order_id,
+                    payload: JSON.stringify({ ...next, registered_by: actor }),
+                    status: "PROCESSED",
+                    received_at: receivedAt,
+                    processed_at: receivedAt
+                });
+                bill = next;
+            }
+            const balance = balanceView(bill, await totalsFor(trx, bill.work_order_id), lock);
+            if (balance.outstanding_balance <= 0) {
+                throw new AppError("This work order is already paid", 409);
+            }
+            return writePayment(trx, {
+                bill,
+                outstanding: balance.outstanding_balance,
+                amount: balance.outstanding_balance,
+                method: request.payment_method,
+                reference: `MOCK-${createId().replace(/-/g, "").slice(0, 12).toUpperCase()}`,
+                actor,
+                action: "payment.checkout"
             });
-            await outbox(trx, {
-                paymentId,
-                type: "payment.succeeded",
-                payload: {
-                    payment_id: paymentId,
-                    work_order_id: bill.work_order_id,
-                    bill_id: bill.bill_id,
-                    bill_version: bill.bill_version,
-                    amount: request.amount,
-                    currency: CURRENCY,
-                    outstanding_balance: balance.outstanding_balance - request.amount
-                }
-            });
-            return {
-                resource_type: "payment",
-                resource_id: paymentId,
-                body: {
-                    ...row,
-                    paid_at: paidAt.toISOString(),
-                    created_at: paidAt.toISOString(),
-                    updated_at: undefined,
-                    outstanding_balance: balance.outstanding_balance - request.amount
-                }
-            };
-        }), "Payment recording unavailable");
+        }), "Payment checkout unavailable");
     }
 
     async function voidPayment(authContext, paymentId, input) {
@@ -841,6 +961,7 @@ function createPaymentService({
     return {
         registerBill,
         recordPayment,
+        checkout,
         voidPayment,
         lockWorkOrderPayments,
         unlockWorkOrderPayments,
@@ -858,5 +979,6 @@ function createPaymentService({
 
 module.exports = {
     PAYMENT_METHODS,
+    CHECKOUT_METHODS,
     createPaymentService
 };
