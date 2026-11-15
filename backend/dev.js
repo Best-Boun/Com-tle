@@ -21,6 +21,7 @@
  */
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
+const net = require("node:net");
 const path = require("node:path");
 
 const SERVICES = [
@@ -73,24 +74,47 @@ function start(service, color) {
     children.push(child);
 }
 
-const selected = SERVICES.filter((s) => s.name === "gateway"
-    || requested.length === 0
-    || requested.includes(s.name));
-let started = 0;
-selected.forEach((service, index) => {
-    const reason = problem(service);
-    if (reason) {
-        console.log(`[skip] ${service.name}: ${reason}`);
-        return;
-    }
-    console.log(`[start] ${service.name} on http://localhost:${service.port}`);
-    start(service, COLORS[index % COLORS.length]);
-    started += 1;
-});
-if (started === 0) {
-    console.error("Nothing to start.");
-    process.exit(1);
+// True when something (often an earlier `node dev.js`) already listens on the port.
+function portInUse(port) {
+    return new Promise((resolve) => {
+        const probe = net.createServer()
+            .once("error", (error) => resolve(error.code === "EADDRINUSE"))
+            .once("listening", () => probe.close(() => resolve(false)))
+            .listen(port);
+    });
 }
+
+async function main() {
+    const selected = SERVICES.filter((s) => s.name === "gateway"
+        || requested.length === 0
+        || requested.includes(s.name));
+    const busy = [];
+    let started = 0;
+    for (const [index, service] of selected.entries()) {
+        const reason = problem(service);
+        if (reason) {
+            console.log(`[skip] ${service.name}: ${reason}`);
+            continue;
+        }
+        if (await portInUse(service.port)) {
+            console.log(`[skip] ${service.name}: port ${service.port} is already in use`);
+            busy.push(service.port);
+            continue;
+        }
+        console.log(`[start] ${service.name} on http://localhost:${service.port}`);
+        start(service, COLORS[index % COLORS.length]);
+        started += 1;
+    }
+    if (busy.length > 0) {
+        console.log(`\nPorts ${busy.join(", ")} are taken, probably by a backend that is already running.`
+            + "\nStop it first (Ctrl+C in its window), or keep using it.");
+    }
+    if (started === 0) {
+        console.error("Nothing to start.");
+        process.exit(1);
+    }
+}
+main();
 
 function stopAll() {
     if (stopping) return;
