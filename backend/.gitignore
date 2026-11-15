@@ -1,7 +1,3 @@
 # Dependencies
 node_modules/
 
-# Local service secrets
-/repair-service/.env
-/repair-service/keys/
-
