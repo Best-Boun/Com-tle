@@ -13,6 +13,8 @@ export default function AdminWorkOrders() {
     const status = params.get("status") ?? "OPEN";
     const search = params.get("q") || "";
     const list = useAsync(() => api.repairs.listAll({ status, search }), [status, search]);
+    const technicians = useAsync(() => api.auth.listTechnicians(), []);
+    const technicianNames = new Map((technicians.data || []).map((user) => [user.user_id, user.full_name]));
 
     const setFilter = (key, value) => {
         const next = new URLSearchParams(params);
@@ -37,6 +39,7 @@ export default function AdminWorkOrders() {
             </div>
             {list.loading && !list.data && <Loading />}
             <ErrorNotice error={list.error} onRetry={list.reload} />
+            <ErrorNotice error={technicians.error} onRetry={technicians.reload} />
             {list.data && (
                 <div className="table-wrap">
                     <table className="table">
@@ -60,7 +63,7 @@ export default function AdminWorkOrders() {
                                     </td>
                                     <td>{w.customer_name}<div className="faint small">{w.customer_phone}</div></td>
                                     <td>{deviceLabel(w)}<div className="faint small">{w.reported_symptom}</div></td>
-                                    <td>{w.technician_name || <span className="badge tone-amber">{L("ยังไม่มอบหมาย", "Unassigned")}</span>}</td>
+                                    <td>{w.technician_name || technicianNames.get(w.technician_id) || <span className="badge tone-amber">{L("ยังไม่มอบหมาย", "Unassigned")}</span>}</td>
                                     <td>
                                         <StatusBadge kind="wo" status={w.handed_over_at ? "HANDED_OVER" : w.status} />
                                         {w.has_pending_quotation && <div className="faint small">{L("มีใบเสนอราคารอดำเนินการ", "Quotation in progress")}</div>}

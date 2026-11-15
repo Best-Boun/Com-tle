@@ -6,7 +6,10 @@ const { createGatewayApp } = require("../src/app");
 const testConfig = {
     allowedOrigins: ["https://frontend.example.test"],
     loginRateLimit: { windowMs: 60_000, max: 2 },
-    serviceUrls: { user: "http://user-service.test" }
+    serviceUrls: {
+        user: "http://user-service.test",
+        repair: "http://repair-service.test"
+    }
 };
 
 async function withGateway(run) {
@@ -335,6 +338,57 @@ test("customer merge routes are proxied only for their exact POST paths", async 
         ]) {
             const response = await request(path, options);
             assert.equal(response.status, 404, `${options.method || "GET"} ${path}`);
+        }
+        assert.equal(getProxyCount(), approved.length);
+    });
+});
+
+test("proxies only the approved Repair-Service workflow routes", async () => {
+    await withGateway(async ({ request, getProxyCount }) => {
+        const workOrderId = "123e4567-e89b-42d3-a456-426614174000";
+        const quotationId = "223e4567-e89b-42d3-a456-426614174000";
+        const partId = "323e4567-e89b-42d3-a456-426614174000";
+        const approved = [
+            ["/api/repairs/work-orders/me", {}],
+            ["/api/repairs/work-orders/assigned", {}],
+            ["/api/repairs/work-orders", {}],
+            ["/api/repairs/work-orders", postOptions()],
+            ["/api/repairs/work-orders/walk-in", postOptions()],
+            [`/api/repairs/work-orders/${workOrderId}/assign`, postOptions()],
+            [`/api/repairs/work-orders/${workOrderId}/diagnosis/start`, postOptions()],
+            [`/api/repairs/work-orders/${workOrderId}/diagnosis`, { ...postOptions(), method: "PUT" }],
+            [`/api/repairs/work-orders/${workOrderId}/quotations`, postOptions()],
+            [`/api/repairs/quotations/${quotationId}/send`, { ...postOptions(), method: "PUT" }],
+            [`/api/repairs/quotations/${quotationId}/revise`, postOptions()],
+            [`/api/repairs/quotations/${quotationId}/decision`, postOptions()],
+            [`/api/repairs/work-orders/${workOrderId}/repair/start`, postOptions()],
+            [`/api/repairs/work-orders/${workOrderId}/repair/result`, { ...postOptions(), method: "PUT" }],
+            [`/api/repairs/work-orders/${workOrderId}/tests`, postOptions()],
+            [`/api/repairs/work-orders/${workOrderId}/handover`, postOptions()],
+            [`/api/repairs/work-orders/${workOrderId}/cancel`, postOptions()],
+            ["/api/repairs/parts", {}],
+            ["/api/repairs/parts", postOptions()],
+            ["/api/repairs/parts/movements", {}],
+            [`/api/repairs/parts/${partId}/receive`, postOptions()],
+            [`/api/repairs/work-orders/${workOrderId}/parts/issue`, postOptions()],
+            [`/api/repairs/work-orders/${workOrderId}`, {}]
+        ];
+
+        for (const [path, options] of approved) {
+            const response = await request(path, options);
+            assert.equal(response.status, 200, path);
+            assert.equal((await response.json()).path, path.slice("/api/repairs".length));
+        }
+
+        for (const [path, options] of [
+            ["/api/repairs/health", {}],
+            ["/api/repairs/work-orders/not-a-uuid", {}],
+            ["/api/repairs/work-orders/not-a-uuid/assign", postOptions()],
+            ["/api/repairs/quotations/not-a-uuid/send", postOptions()],
+            ["/api/repairs/parts/not-a-uuid/receive", postOptions()],
+            ["/api/repairs/work-orders", { method: "DELETE" }]
+        ]) {
+            assert.equal((await request(path, options)).status, 404, path);
         }
         assert.equal(getProxyCount(), approved.length);
     });

@@ -154,11 +154,12 @@ test("confirm then check-in creates exactly one work order and completes the boo
     const confirmed = await service.confirmBooking(booking.booking_id, ADMIN);
     assert.equal(confirmed.status, "CONFIRMED");
 
-    const completed = await service.checkIn(booking.booking_id, ADMIN, CTX);
+    const completed = await service.checkIn(booking.booking_id, ADMIN, CTX, { accessories: "Charger" });
     assert.equal(completed.status, "COMPLETED");
     assert.ok(completed.work_order_id);
     assert.equal(clients.calls.repair[0].ctx.idempotencyKey, `booking-${booking.booking_id}`);
     assert.equal(clients.calls.repair[0].payload.serial_number, "SN-123");
+    assert.equal(clients.calls.repair[0].payload.accessories, "Charger");
 
     await assert.rejects(service.checkIn(booking.booking_id, ADMIN, CTX), { statusCode: 409 });
     assert.equal(clients.calls.repair.length, 1);

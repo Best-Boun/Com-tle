@@ -16,7 +16,13 @@ export default function WalkInNew() {
 
     async function submit(e) {
         e.preventDefault();
-        const wo = await run(() => api.repairs.createWalkIn(f), L("เปิดใบงานแล้ว", "Work order opened")).catch(() => null);
+        const service = services.data?.find((item) => item.service_id === f.service_id);
+        const payload = {
+            ...f,
+            service_name: service?.service_name || null,
+            service_code: service?.service_code || null
+        };
+        const wo = await run(() => api.repairs.createWalkIn(payload), L("เปิดใบงานแล้ว", "Work order opened")).catch(() => null);
         if (wo) navigate(`/admin/work-orders/${wo.work_order_id}`);
     }
 

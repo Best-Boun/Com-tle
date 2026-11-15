@@ -2,7 +2,7 @@
 
 React + Vite web app for the SmartFix repair shop — customer, technician and admin screens, Thai / English.
 
-> **Status:** works fully on **built-in demo data** by default. With `VITE_USE_MOCK=false`, auth, catalog, bookings and payments use the real backend through the API Gateway (see *Real API mode*).
+> **Status:** works on **built-in demo data** by default. With `VITE_USE_MOCK=false`, repair workflow, parts stock, payments, auth, catalog and bookings use the backend through the API Gateway (see *Real API mode*).
 
 ## Run
 
@@ -48,7 +48,7 @@ Demo data is saved in the browser (localStorage). **Reset demo data** in the foo
 1. 1 booking → 1 work order (check-in), walk-ins create work orders directly
 2. Quotation revisions are never overwritten (Rev.1 rejected → Rev.2 …)
 3. Extra problems during repair → *additional* quotation; approved work continues
-4. Parts are issued through Inventory, only within the approved scope and available stock
+4. Parts are issued from Repair-Service inventory, only within the approved scope and available stock
 5. Partial payments; balance is computed from transactions (UNPAID / PARTIAL / PAID / PARTIALLY_REFUNDED / REFUNDED)
 6. Handover needs completed + tested + paid, otherwise an admin exception with reason and outstanding amount is recorded
 7. Cancelling keeps all history; issued parts can be returned to stock
@@ -85,12 +85,16 @@ Then start the backend (`cd backend && npm run dev`) and `npm run dev` here. The
 | auth | User Service `/api/users` | login, register, profile, technician list |
 | catalog | Catalog Service `/api/catalog` | reading is public; changes need ADMIN |
 | bookings | Booking Service `/api/bookings` | customer names for admins come from User Service |
-| payments | Payment Service `/api/payments` | bridges to demo work orders |
-| repairs, inventory | — demo data | Repair / Inventory services not built yet |
-| dashboard | mixed | booking figures real, work orders / parts demo |
+| payments | Payment Service `/api/payments` | bills are derived from approved Repair-Service quotations; refunds retain the two-person approval flow |
+| repairs | Repair Service `/api/repairs` | check-in, walk-ins, assignment, diagnosis, quotations, repair, testing, handover and cancellation use persistent work orders |
+| inventory | Repair Service `/api/repairs/parts` | parts and stock movements persist in the Repair database; issue quantities are checked against approved quotations |
+| dashboard | Booking, Repair, Payment and Repair parts APIs | real operational counts and low-stock/payment summaries |
 
-**Check-in needs Repair Service.** Until it implements `POST /work-orders` (see
-`backend/booking-service/README.md`), "Check in" shows an error and the booking stays CONFIRMED.
+**Repair workflow needs the additive Repair-Service migration.** Copy its
+`.env.example`, configure database/JWT values and `PAYMENT_SERVICE_URL`, then run
+`npx knex migrate:latest --env development` from `backend/repair-service`.
+Payment and handover also require Payment-Service to be running. Repair parts
+use Repair-Service's database because Inventory Service has no implementation yet.
 
 Pages only call `api.<module>.<function>()` from `src/api/index.js`; each real module in
 `src/api/http/` keeps the same function names and return shapes as the demo one in `src/api/mock/`.

@@ -20,6 +20,7 @@ function createGatewayApp(config, { proxyFactory } = {}) {
         paymentServiceUrl: config.serviceUrls.payment,
         bookingServiceUrl: config.serviceUrls.booking,
         catalogServiceUrl: config.serviceUrls.catalog,
+        repairServiceUrl: config.serviceUrls.repair,
         loginRateLimiter: createLoginRateLimiter(config.loginRateLimit),
         proxyFactory
     });
