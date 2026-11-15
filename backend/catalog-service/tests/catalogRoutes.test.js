@@ -32,11 +32,30 @@ async function withServer(fn) {
 
 const auth = (roles) => ({ authorization: `Bearer ${signToken("user-1", roles)}`, "content-type": "application/json" });
 
-test("health is public; catalog routes need a token", async () => {
+test("reading services and categories is public; managing needs a token", async () => {
     await withServer(async (base) => {
         assert.equal((await fetch(`${base}/health`)).status, 200);
-        assert.equal((await fetch(`${base}/services`)).status, 401);
-        assert.equal((await fetch(`${base}/categories`)).status, 401);
+        const list = await fetch(`${base}/services`);
+        assert.equal(list.status, 200);
+        assert.equal((await list.json()).data.length, 1);
+        assert.equal((await fetch(`${base}/categories`)).status, 200);
+        assert.equal((await fetch(`${base}/services/${SVC_ACTIVE}`)).status, 200);
+        assert.equal((await fetch(`${base}/services`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status, 401);
+        assert.equal((await fetch(`${base}/audit-logs`)).status, 401);
+    });
+});
+
+test("anonymous visitors cannot see inactive services", async () => {
+    await withServer(async (base) => {
+        const res = await fetch(`${base}/services?include_inactive=true`);
+        assert.equal((await res.json()).data.length, 1);
+    });
+});
+
+test("an invalid token on a public read is still rejected", async () => {
+    await withServer(async (base) => {
+        const res = await fetch(`${base}/services`, { headers: { authorization: "Bearer not-a-token" } });
+        assert.equal(res.status, 401);
     });
 });
 
@@ -54,9 +73,11 @@ test("customer can list services and categories and view one service", async () 
     });
 });
 
-test("technician has no catalog permission", async () => {
+test("technician can read the catalog but not change it", async () => {
     await withServer(async (base) => {
-        assert.equal((await fetch(`${base}/services`, { headers: auth(["TECHNICIAN"]) })).status, 403);
+        assert.equal((await fetch(`${base}/services`, { headers: auth(["TECHNICIAN"]) })).status, 200);
+        const payload = JSON.stringify({ category_id: CAT_ACTIVE, service_code: "X-1", service_name: "X", starting_price: 1, estimated_duration_minutes: 10 });
+        assert.equal((await fetch(`${base}/services`, { method: "POST", headers: auth(["TECHNICIAN"]), body: payload })).status, 403);
     });
 });
 
@@ -78,6 +99,17 @@ test("only admin can create services and read audit logs", async () => {
         const logs = await fetch(`${base}/audit-logs`, { headers: auth(["ADMIN"]) });
         assert.equal(logs.status, 200);
         assert.equal((await logs.json()).data.length, 1);
+    });
+});
+
+test("non-access tokens (e.g. refresh) are rejected", async () => {
+    const { privateKey } = require("./helpers");
+    await withServer(async (base) => {
+        const token = jwt.sign({ roles: ["ADMIN"], token_use: "refresh" }, privateKey, {
+            algorithm: "RS256", subject: "x", issuer: ISSUER, audience: AUDIENCE, expiresIn: 60
+        });
+        const res = await fetch(`${base}/audit-logs`, { headers: { authorization: `Bearer ${token}` } });
+        assert.equal(res.status, 401);
     });
 });
 

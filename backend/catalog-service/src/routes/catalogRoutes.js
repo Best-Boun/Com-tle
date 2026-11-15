@@ -5,7 +5,8 @@ const { createCatalogController } = require("../controllers/catalogController");
 
 /**
  * Mounted at the service root; the Gateway strips "/api/catalog".
- *   /categories..., /services..., /audit-logs
+ *   GET /categories, /services, /services/:id  — public (token optional)
+ *   everything else                            — catalog.manage
  */
 function createCatalogRouter({ catalogService, authenticate }) {
     if (!catalogService || typeof authenticate !== "function") {
@@ -14,23 +15,28 @@ function createCatalogRouter({ catalogService, authenticate }) {
 
     const router = express.Router();
     const c = createCatalogController(catalogService);
-    const canView = requireAnyPermission(PERMISSIONS.CATALOG_VIEW, PERMISSIONS.CATALOG_MANAGE);
     const canManage = requireAnyPermission(PERMISSIONS.CATALOG_MANAGE);
 
-    router.use(authenticate);
+    // Reading the service list and prices is public (home page, price list).
+    // A token is optional; when sent it must be valid, and admins may then
+    // ask for inactive items with include_inactive=true.
+    const optionalAuth = (req, res, next) => (
+        req.headers.authorization ? authenticate(req, res, next) : next()
+    );
+    const manage = [authenticate, canManage];
 
-    router.get("/categories", canView, c.listCategories);
-    router.post("/categories", canManage, c.createCategory);
-    router.patch("/categories/:categoryId", canManage, c.updateCategory);
-    router.patch("/categories/:categoryId/status", canManage, c.setCategoryStatus);
+    router.get("/categories", optionalAuth, c.listCategories);
+    router.post("/categories", ...manage, c.createCategory);
+    router.patch("/categories/:categoryId", ...manage, c.updateCategory);
+    router.patch("/categories/:categoryId/status", ...manage, c.setCategoryStatus);
 
-    router.get("/services", canView, c.listServices);
-    router.get("/services/:serviceId", canView, c.getService);
-    router.post("/services", canManage, c.createService);
-    router.patch("/services/:serviceId", canManage, c.updateService);
-    router.patch("/services/:serviceId/status", canManage, c.setServiceStatus);
+    router.get("/services", optionalAuth, c.listServices);
+    router.get("/services/:serviceId", optionalAuth, c.getService);
+    router.post("/services", ...manage, c.createService);
+    router.patch("/services/:serviceId", ...manage, c.updateService);
+    router.patch("/services/:serviceId/status", ...manage, c.setServiceStatus);
 
-    router.get("/audit-logs", canManage, c.listAuditLogs);
+    router.get("/audit-logs", ...manage, c.listAuditLogs);
 
     return router;
 }

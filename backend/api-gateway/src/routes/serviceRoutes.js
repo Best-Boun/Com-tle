@@ -43,6 +43,30 @@ const paymentRoutePatterns = [
     ["POST", /^\/refunds\/[^/]+\/(?:approve|reject|execute)$/]
 ];
 
+// Booking-Service routes under /api/bookings (ids are UUIDs, so /health stays unmapped).
+const UUID = "[0-9a-fA-F-]{36}";
+const bookingRoutePatterns = [
+    ["GET", /^\/availability$/],
+    ["GET", /^\/me$/],
+    ["GET", /^\/$/],
+    ["POST", /^\/$/],
+    ["GET", new RegExp(`^\\/${UUID}$`)],
+    ["PATCH", new RegExp(`^\\/${UUID}\\/(?:confirm|cancel)$`)],
+    ["POST", new RegExp(`^\\/${UUID}\\/check-in$`)]
+];
+
+// Catalog-Service routes under /api/catalog.
+const catalogRoutePatterns = [
+    ["GET", /^\/categories$/],
+    ["POST", /^\/categories$/],
+    ["PATCH", new RegExp(`^\\/categories\\/${UUID}(?:\\/status)?$`)],
+    ["GET", /^\/services$/],
+    ["POST", /^\/services$/],
+    ["GET", new RegExp(`^\\/services\\/${UUID}$`)],
+    ["PATCH", new RegExp(`^\\/services\\/${UUID}(?:\\/status)?$`)],
+    ["GET", /^\/audit-logs$/]
+];
+
 function allowOnly(patterns) {
     return (req, res, next) => (
         patterns.some(([method, pathPattern]) => req.method === method && pathPattern.test(req.path))
@@ -72,6 +96,8 @@ function createServiceProxy(target) {
 function registerServiceRoutes(app, {
     userServiceUrl,
     paymentServiceUrl,
+    bookingServiceUrl,
+    catalogServiceUrl,
     loginRateLimiter,
     proxyFactory = createServiceProxy
 } = {}) {
@@ -103,6 +129,14 @@ function registerServiceRoutes(app, {
 
     if (paymentServiceUrl) {
         app.use("/api/payments", allowOnly(paymentRoutePatterns), proxyFactory(paymentServiceUrl));
+    }
+
+    if (bookingServiceUrl) {
+        app.use("/api/bookings", allowOnly(bookingRoutePatterns), proxyFactory(bookingServiceUrl));
+    }
+
+    if (catalogServiceUrl) {
+        app.use("/api/catalog", allowOnly(catalogRoutePatterns), proxyFactory(catalogServiceUrl));
     }
 
     for (const prefix of deniedProxyPrefixes) {

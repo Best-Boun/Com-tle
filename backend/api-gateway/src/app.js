@@ -18,6 +18,8 @@ function createGatewayApp(config, { proxyFactory } = {}) {
     registerServiceRoutes(app, {
         userServiceUrl: config.serviceUrls.user,
         paymentServiceUrl: config.serviceUrls.payment,
+        bookingServiceUrl: config.serviceUrls.booking,
+        catalogServiceUrl: config.serviceUrls.catalog,
         loginRateLimiter: createLoginRateLimiter(config.loginRateLimit),
         proxyFactory
     });

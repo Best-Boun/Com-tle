@@ -2,7 +2,7 @@
 
 React + Vite web app for the SmartFix repair shop — customer, technician and admin screens, Thai / English.
 
-> **Status:** every page works on **built-in demo data** (`src/api/mock`). The real backend is not connected yet.
+> **Status:** works fully on **built-in demo data** by default. With `VITE_USE_MOCK=false`, auth, catalog, bookings and payments use the real backend through the API Gateway (see *Real API mode*).
 
 ## Run
 
@@ -68,13 +68,29 @@ src/
   styles/             ← tokens.css (colors, type, spacing), components, layout, ticket
 ```
 
-## Connecting the real API later
+## Real API mode
 
-Pages only call `api.<module>.<function>()` from `src/api/index.js`. To switch a module:
+Set in `frontend/.env`:
 
-1. Add e.g. `src/api/http/bookings.js` exporting the **same function names** as `mock.bookings`, calling the Gateway (`VITE_API_URL`, default `http://localhost:3000/api`) with the JWT from `session.js`.
-2. In `src/api/index.js` replace `bookings: mock.bookings` with the HTTP version.
+```
+VITE_USE_MOCK=false
+VITE_API_URL=http://localhost:3000/api
+```
 
-Booking and Catalog mock responses already use the same field names as `booking-service` and `catalog-service`. The Repair, Inventory and Payment mocks are a **proposed contract** for those services — see `src/api/mock/index.js`.
+Then start the backend (`cd backend && npm run dev`) and `npm run dev` here. The API Gateway's
+`CORS_ALLOWED_ORIGINS` must include `http://localhost:5173`.
 
-The Gateway must first allow `/api/bookings` and `/api/catalog` (currently denied) and enable CORS for the frontend origin (`CORS_ALLOWED_ORIGINS=http://localhost:5173`).
+| Module | Real backend | Notes |
+|---|---|---|
+| auth | User Service `/api/users` | login, register, profile, technician list |
+| catalog | Catalog Service `/api/catalog` | reading is public; changes need ADMIN |
+| bookings | Booking Service `/api/bookings` | customer names for admins come from User Service |
+| payments | Payment Service `/api/payments` | bridges to demo work orders |
+| repairs, inventory | — demo data | Repair / Inventory services not built yet |
+| dashboard | mixed | booking figures real, work orders / parts demo |
+
+**Check-in needs Repair Service.** Until it implements `POST /work-orders` (see
+`backend/booking-service/README.md`), "Check in" shows an error and the booking stays CONFIRMED.
+
+Pages only call `api.<module>.<function>()` from `src/api/index.js`; each real module in
+`src/api/http/` keeps the same function names and return shapes as the demo one in `src/api/mock/`.

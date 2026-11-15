@@ -19,16 +19,16 @@ npm test
 
 ## Endpoints
 
-Gateway prefix: `/api/catalog`. All need `Authorization: Bearer <token>`.
+Gateway prefix: `/api/catalog`. **Reading is public** (home page and price list work without login): `GET /categories`, `GET /services`, `GET /services/:id` accept an optional token — if one is sent it must be valid. Everything else needs `Authorization: Bearer <admin token>`.
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| GET | `/categories` | catalog.view / manage | admin may add `?include_inactive=true` |
+| GET | `/categories` | public | admin may add `?include_inactive=true` |
 | POST | `/categories` | catalog.manage | `{ category_code, category_name, description? }` |
 | PATCH | `/categories/:categoryId` | catalog.manage | `category_name`, `description` (code cannot change) |
 | PATCH | `/categories/:categoryId/status` | catalog.manage | `{ "is_active": false }` hides all its services |
-| GET | `/services` | catalog.view / manage | `?category_id=&category_code=&search=&page=&limit=`; admin may add `include_inactive=true` |
-| GET | `/services/:serviceId` | catalog.view / manage | inactive service/category → 404 for non-admins |
+| GET | `/services` | public | `?category_id=&category_code=&search=&page=&limit=`; admin may add `include_inactive=true` |
+| GET | `/services/:serviceId` | public | inactive service/category → 404 for non-admins |
 | POST | `/services` | catalog.manage | `{ category_id, service_code, service_name, starting_price, estimated_duration_minutes, description?, currency? }` |
 | PATCH | `/services/:serviceId` | catalog.manage | any of category_id, service_name, description, starting_price, currency, estimated_duration_minutes |
 | PATCH | `/services/:serviceId/status` | catalog.manage | `{ "is_active": false }` |
