@@ -80,6 +80,13 @@ export function QuotationCard({ quotation, superseded = false, children }) {
 /** Balance is computed by the Payment Service from recorded transactions. */
 export function PaymentSummary({ payment }) {
     const { L } = useI18n();
+    if (payment.unavailable) {
+        return (
+            <div className="notice warn small" role="status">
+                {L("ระบบการเงินไม่พร้อมใช้งานชั่วคราว ยอดชำระจะแสดงเมื่อระบบกลับมา ส่วนอื่นของใบงานใช้งานได้ตามปกติ", "The payment system is temporarily unavailable. Balances will show again once it is back; the rest of this ticket works as usual.")}
+            </div>
+        );
+    }
     return (
         <div className="pay-sum">
             <div><span className="muted">{L("ยอดตามใบเสนอราคาที่อนุมัติ", "Approved total")}</span><Money value={payment.due} /></div>

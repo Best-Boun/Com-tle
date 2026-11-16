@@ -369,28 +369,51 @@ export const payments = {
         return toTransactions(paid, refunds);
     },
 
+    /**
+     * Payment fields for a work order page. When Payment-Service is down the
+     * work order still loads: the payment box says money data is unavailable
+     * instead of the whole page failing (one service down must not take
+     * the others' screens with it).
+     */
     async detailsFor(wo) {
-        const roles = getSessionUser()?.roles || [];
-        let balance = null;
-        if (roles.includes("ADMIN")) {
-            try {
-                balance = await payments.balanceFor(wo.work_order_id);
-            } catch (error) {
-                if (error.status !== 404) throw error;
-            }
-        } else if (roles.includes("CUSTOMER")) {
-            const data = await request("/payments/my");
-            balance = data.items.find((entry) => entry.work_order_id === wo.work_order_id) || null;
+        try {
+            return await loadPaymentDetails(wo);
+        } catch (error) {
+            if (!serviceDown(error)) throw error;
+            return {
+                payment: { due: approvedTotal(wo), paid: 0, refunded: 0, net_paid: 0, balance: 0, status: "UNKNOWN", unavailable: true },
+                payments: []
+            };
         }
-        const payment = summaryForWorkOrder(wo, balance);
-        return {
-            payment,
-            payments: await payments.transactionsFor(wo.work_order_id)
-        };
     },
 
     sync: (woId) => refreshedWorkOrder(woId)
 };
+
+/** Gateway 502/503/504, or no answer at all: the service is down, not the request wrong. */
+export function serviceDown(error) {
+    return !error?.status || error.status >= 500;
+}
+
+async function loadPaymentDetails(wo) {
+    const roles = getSessionUser()?.roles || [];
+    let balance = null;
+    if (roles.includes("ADMIN")) {
+        try {
+            balance = await payments.balanceFor(wo.work_order_id);
+        } catch (error) {
+            if (error.status !== 404) throw error;
+        }
+    } else if (roles.includes("CUSTOMER")) {
+        const data = await request("/payments/my");
+        balance = data.items.find((entry) => entry.work_order_id === wo.work_order_id) || null;
+    }
+    const payment = summaryForWorkOrder(wo, balance);
+    return {
+        payment,
+        payments: await payments.transactionsFor(wo.work_order_id)
+    };
+}
 
 async function refundAction(refundId, action, body) {
     return request(`/payments/refunds/${refundId}/${action}`, { method: "POST", body });

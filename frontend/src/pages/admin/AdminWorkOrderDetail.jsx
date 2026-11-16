@@ -73,15 +73,19 @@ export default function AdminWorkOrderDetail() {
     // box fresh. Only payment fields are replaced: forms on the page stay as typed.
     const latest = useRef(wo.data);
     latest.current = wo.data;
-    const awaitingPayment = Boolean(wo.data && wo.data.payment.balance > 0 && wo.data.status !== "CANCELLED");
+    const paymentDown = Boolean(wo.data?.payment.unavailable);
+    const awaitingPayment = Boolean(wo.data && (wo.data.payment.balance > 0 || paymentDown) && wo.data.status !== "CANCELLED");
     useEffect(() => {
         if (!awaitingPayment || modal) return undefined;
         const timer = setInterval(async () => {
             if (document.hidden) return;
             const fresh = await api.repairs.get(workOrderId).catch(() => null);
             const current = latest.current;
-            if (!fresh || !current || fresh.payment.paid === current.payment.paid) return;
+            if (!fresh || !current) return;
+            const recovered = Boolean(current.payment.unavailable) !== Boolean(fresh.payment.unavailable);
+            if (!recovered && fresh.payment.paid === current.payment.paid) return;
             wo.setData({ ...current, payment: fresh.payment, payments: fresh.payments });
+            if (recovered) refunds.reload();
         }, PAYMENT_POLL_MS);
         return () => clearInterval(timer);
     }, [awaitingPayment, modal, workOrderId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -182,6 +186,9 @@ export default function AdminWorkOrderDetail() {
                     {canHandover && (
                         <section className="action-panel">
                             <h2>{L("ส่งมอบเครื่องให้ลูกค้า", "Hand the device back")}</h2>
+                            {paymentDown ? (
+                                <div className="notice warn">{L("ตรวจยอดชำระไม่ได้เพราะระบบการเงินไม่พร้อม ส่งมอบได้เมื่อระบบกลับมา (หน้านี้จะอัปเดตเอง)", "Payments can't be checked while the payment system is down. Hand over once it is back (this page updates by itself).")}</div>
+                            ) : (<>
                             {w.payment.balance > 0
                                 ? <div className="notice warn">{L(`ยังค้างชำระ ${fmt.money(w.payment.balance)} ต้องรับชำระให้ครบ หรือให้ Admin อนุมัติข้อยกเว้นพร้อมเหตุผล`, `${fmt.money(w.payment.balance)} still due. Take payment first, or approve an exception with a reason.`)}</div>
                                 : <p className="muted small">{L("ซ่อมเสร็จ ทดสอบผ่าน และชำระครบแล้ว", "Repaired, tested and fully paid.")}</p>}
@@ -191,6 +198,7 @@ export default function AdminWorkOrderDetail() {
                                     {w.payment.balance > 0 ? L("ส่งมอบแบบข้อยกเว้น", "Hand over with exception") : L("ส่งมอบเครื่องแล้ว", "Mark as handed over")}
                                 </button>
                             </div>
+                            </>)}
                         </section>
                     )}
 
@@ -257,7 +265,7 @@ export default function AdminWorkOrderDetail() {
                                 {w.payments.map((p) => <li key={p.payment_id}>{fmt.dateTime(p.created_at)} · {t(`pay.type.${p.type}`)} {fmt.money(p.amount)}{p.type === "PAYMENT" ? ` · ${t(`pay.method.${p.method}`)}` : ""}{p.note ? ` · ${p.note}` : ""}</li>)}
                             </ul>
                         )}
-                        {refunds.error && <ErrorNotice error={refunds.error} onRetry={refunds.reload} />}
+                        {refunds.error && !paymentDown && <ErrorNotice error={refunds.error} onRetry={refunds.reload} />}
                         {refundList.length > 0 && (
                             <div className="stack">
                                 <h4 className="small">{L("คำขอคืนเงิน", "Refund requests")}</h4>

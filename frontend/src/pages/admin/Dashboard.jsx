@@ -30,7 +30,7 @@ export default function Dashboard() {
                 <div className="kpi"><span className="kpi-icon"><Icon.Calendar /></span><span className="kpi-label">{L("นัดวันนี้", "Appointments today")}</span><strong className="num">{d.bookings_today}</strong></div>
                 <div className="kpi"><span className="kpi-icon"><Icon.Wrench /></span><span className="kpi-label">{L("งานที่เปิดอยู่", "Open jobs")}</span><strong className="num">{d.open_work_orders}</strong></div>
                 <div className="kpi"><span className="kpi-icon"><Icon.Clipboard /></span><span className="kpi-label">{L("รอลูกค้าอนุมัติ", "Awaiting customer")}</span><strong className="num">{d.waiting_approval}</strong></div>
-                <div className="kpi kpi-money"><span className="kpi-icon"><Icon.Cash /></span><span className="kpi-label">{L("ยอดค้างชำระรวม", "Outstanding")}</span><strong className="num"><Money value={d.outstanding_total} /></strong></div>
+                <div className="kpi kpi-money"><span className="kpi-icon"><Icon.Cash /></span><span className="kpi-label">{L("ยอดค้างชำระรวม", "Outstanding")}</span><strong className="num">{d.outstanding_total === null ? <span title={L("ระบบการเงินไม่พร้อมใช้งาน", "Payment system unavailable")}>—</span> : <Money value={d.outstanding_total} />}</strong>{d.outstanding_total === null && <span className="small faint">{L("ระบบการเงินไม่พร้อม", "Payments unavailable")}</span>}</div>
             </div>
 
             <div className="dash-grid">

@@ -9,7 +9,7 @@
  */
 import * as mock from "./mock/index.js";
 import { auth as httpAuth } from "./http/auth.js";
-import { payments as httpPayments, setWorkOrderLoader } from "./http/payments.js";
+import { payments as httpPayments, serviceDown, setWorkOrderLoader } from "./http/payments.js";
 import { bookings as httpBookings } from "./http/bookings.js";
 import { catalog as httpCatalog } from "./http/catalog.js";
 import { staff as httpStaff } from "./http/staff.js";
@@ -73,7 +73,11 @@ const dashboard = USING_MOCK ? mock.dashboard : {
             httpBookings.dashboardFigures(),
             httpRepairs.listAll(),
             httpInventory.listParts(),
-            httpPayments.outstandingTotal()
+            // Payment-Service down: the rest of the dashboard still shows.
+            httpPayments.outstandingTotal().catch((error) => {
+                if (serviceDown(error)) return null;
+                throw error;
+            })
         ]);
         const count = (status) => workOrders.filter((workOrder) => workOrder.status === status).length;
         const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
