@@ -55,7 +55,7 @@ export default function Login() {
                 </p>
                 <div className="demo-accounts">
                     {api.demo.accounts.map((a) => (
-                        <button key={a.role} type="button" className="btn btn-secondary" disabled={busy} onClick={() => signIn(null, { email: a.email, password: api.demo.password })}>
+                        <button key={a.email} type="button" className="btn btn-secondary" disabled={busy} onClick={() => signIn(null, { email: a.email, password: api.demo.password })}>
                             <span>{t(`role.${a.role}`)}</span>
                             <span className="faint small">{a.email}</span>
                         </button>

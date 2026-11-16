@@ -716,3 +716,38 @@
 .stack-lg > .page-head {
     margin-bottom: 0;
 }
+
+/* Refund requests (two-person approval) */
+.refund-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--s2);
+}
+.refund-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--s3);
+    flex-wrap: wrap;
+    padding: var(--s3);
+    border: 1px solid var(--line-soft);
+    border-radius: var(--r-control);
+}
+.refund-main { display: grid; gap: 4px; min-width: 0; flex: 1 1 220px; }
+.refund-head { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.refund-actions { flex: 0 0 auto; }
+.refund-mine { display: grid; gap: 6px; justify-items: start; }
+.tab-count {
+    display: inline-block;
+    min-width: 1.4em;
+    margin-left: 6px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--amber-tint);
+    color: var(--amber-ink);
+    font-size: 0.8em;
+    font-weight: 700;
+    text-align: center;
+}

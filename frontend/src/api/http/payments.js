@@ -259,9 +259,9 @@ export const payments = {
     },
 
     /**
-     * Old one-step refund button: files refund REQUESTS against the work
-     * order's payments (newest first). Another admin must approve and execute
-     * them before the balance changes.
+     * "Request refund" on a work order: files refund REQUESTS against its
+     * payments (newest first). Another admin approves and executes them from
+     * the refund list (approveRefund / executeRefund) before the balance changes.
      */
     async refund(woId, { amount, note }) {
         const n = Number(amount);

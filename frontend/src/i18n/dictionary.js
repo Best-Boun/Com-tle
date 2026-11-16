@@ -37,6 +37,10 @@ export const DICT = {
         "status.pay.PAID": "ชำระครบ",
         "status.pay.PARTIALLY_REFUNDED": "คืนเงินบางส่วน",
         "status.pay.REFUNDED": "คืนเงินครบ",
+        "status.refund.REQUESTED": "รออนุมัติ",
+        "status.refund.APPROVED": "อนุมัติแล้ว รอโอนคืน",
+        "status.refund.COMPLETED": "คืนเงินแล้ว",
+        "status.refund.REJECTED": "ปฏิเสธ/ยกเลิก",
 
         "pay.method.CASH": "เงินสด",
         "pay.method.TRANSFER": "โอนเงิน",
@@ -100,6 +104,10 @@ export const DICT = {
         "status.pay.PAID": "Paid",
         "status.pay.PARTIALLY_REFUNDED": "Partly refunded",
         "status.pay.REFUNDED": "Refunded",
+        "status.refund.REQUESTED": "Awaiting approval",
+        "status.refund.APPROVED": "Approved, to pay out",
+        "status.refund.COMPLETED": "Refunded",
+        "status.refund.REJECTED": "Rejected/withdrawn",
 
         "pay.method.CASH": "Cash",
         "pay.method.TRANSFER": "Bank transfer",
@@ -136,7 +144,8 @@ export const TONES = {
     booking: { PENDING: "amber", CONFIRMED: "blue", COMPLETED: "green", CANCELLED: "grey" },
     wo: { PENDING: "grey", DIAGNOSING: "blue", WAITING_APPROVAL: "amber", APPROVED: "blue", REPAIRING: "blue", TESTING: "blue", COMPLETED: "green", CANCELLED: "grey", HANDED_OVER: "green" },
     quote: { DRAFT: "grey", SENT: "amber", APPROVED: "green", REJECTED: "red" },
-    pay: { UNPAID: "red", PARTIAL: "amber", PAID: "green", PARTIALLY_REFUNDED: "blue", REFUNDED: "grey" }
+    pay: { UNPAID: "red", PARTIAL: "amber", PAID: "green", PARTIALLY_REFUNDED: "blue", REFUNDED: "grey" },
+    refund: { REQUESTED: "amber", APPROVED: "blue", COMPLETED: "green", REJECTED: "grey" }
 };
 
 /** Repair stages shown to customers, in order. */
