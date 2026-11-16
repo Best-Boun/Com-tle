@@ -6,6 +6,7 @@ import { useAsync } from "../../utils/useAsync.js";
 import { ErrorNotice, Loading, Modal, Money, Stamp, TextField, useAction } from "../../components/ui.jsx";
 import { PaymentSummary, QuotationCard, RepairProgress, WoHistory, deviceLabel } from "../../components/repair.jsx";
 import ItemsEditor, { itemsValid, toPayload } from "../../components/ItemsEditor.jsx";
+import RefundRequests, { OPEN_REFUND } from "../../components/RefundRequests.jsx";
 import "./admin.css";
 
 const OPEN = ["PENDING", "DIAGNOSING", "WAITING_APPROVAL", "APPROVED", "REPAIRING", "TESTING"];
@@ -45,6 +46,7 @@ export default function AdminWorkOrderDetail() {
     const wo = useAsync(() => api.repairs.get(workOrderId), [workOrderId]);
     const techs = useAsync(() => api.auth.listTechnicians(), []);
     const parts = useAsync(() => api.inventory.listParts(), []);
+    const refunds = useAsync(() => api.payments.listRefunds({ work_order_id: workOrderId }), [workOrderId]);
     const [run, busy] = useAction();
     const [modal, setModal] = useState(null); // "pay" | "refund" | "handover" | "cancel" | {decide: quotation}
     const [form, setForm] = useState({});
@@ -56,8 +58,15 @@ export default function AdminWorkOrderDetail() {
             setModal(null);
             setForm({});
             parts.reload();
+            refunds.reload();
         }
         return updated;
+    }
+
+    // Approving or paying out a refund changes the balance shown in the payment box.
+    function refundsChanged() {
+        refunds.reload();
+        wo.reload();
     }
 
     // Customers can pay online, so while money is still due keep the payment
@@ -86,6 +95,9 @@ export default function AdminWorkOrderDetail() {
     const rejectedToRevise = w.quotations.filter((q) => q.status === "REJECTED" && !w.quotations.some((x) => x.kind === q.kind && x.revision > q.revision));
     const issuable = ["APPROVED", "REPAIRING", "TESTING"].includes(w.status) ? w.parts.filter((p) => p.remaining_qty > 0) : [];
     const canHandover = w.status === "COMPLETED" && w.test_result?.passed && !w.handed_over_at;
+    const refundList = refunds.data || [];
+    const reserved = refundList.filter((r) => OPEN_REFUND.includes(r.status)).reduce((s, r) => s + r.amount, 0);
+    const refundable = Math.max(0, w.payment.net_paid - reserved);
 
     return (
         <div className="stack-lg">
@@ -238,12 +250,19 @@ export default function AdminWorkOrderDetail() {
                         <PaymentSummary payment={w.payment} />
                         <div className="btn-row">
                             <button type="button" className="btn btn-secondary btn-sm" disabled={w.payment.balance <= 0 || w.status === "CANCELLED"} onClick={() => { setForm({ amount: String(w.payment.balance), method: "CASH", note: "" }); setModal("pay"); }}>{L("รับชำระ", "Take payment")}</button>
-                            <button type="button" className="btn btn-ghost btn-sm" disabled={w.payment.net_paid <= 0} onClick={() => { setForm({ amount: "", note: "" }); setModal("refund"); }}>{L("คืนเงิน", "Refund")}</button>
+                            <button type="button" className="btn btn-ghost btn-sm" disabled={refundable <= 0} onClick={() => { setForm({ amount: "", note: "" }); setModal("refund"); }}>{L("ขอคืนเงิน", "Request refund")}</button>
                         </div>
                         {w.payments.length > 0 && (
                             <ul className="small muted" style={{ margin: 0, paddingLeft: 18 }}>
                                 {w.payments.map((p) => <li key={p.payment_id}>{fmt.dateTime(p.created_at)} · {t(`pay.type.${p.type}`)} {fmt.money(p.amount)}{p.type === "PAYMENT" ? ` · ${t(`pay.method.${p.method}`)}` : ""}{p.note ? ` · ${p.note}` : ""}</li>)}
                             </ul>
+                        )}
+                        {refunds.error && <ErrorNotice error={refunds.error} onRetry={refunds.reload} />}
+                        {refundList.length > 0 && (
+                            <div className="stack">
+                                <h4 className="small">{L("คำขอคืนเงิน", "Refund requests")}</h4>
+                                <RefundRequests refunds={refundList} onChanged={refundsChanged} />
+                            </div>
                         )}
                     </section>
 
@@ -302,14 +321,15 @@ export default function AdminWorkOrderDetail() {
             )}
 
             {modal === "refund" && (
-                <Modal title={L("คืนเงิน", "Refund")} onClose={() => setModal(null)} footer={(
+                <Modal title={L("ขอคืนเงิน", "Request a refund")} onClose={() => setModal(null)} footer={(
                     <>
                         <button type="button" className="btn btn-secondary" onClick={() => setModal(null)}>{t("common.cancel")}</button>
-                        <button type="button" className="btn btn-danger" disabled={busy || !form.amount || !form.note?.trim()} onClick={() => act(() => api.payments.refund(w.work_order_id, form), L("บันทึกการคืนเงินแล้ว", "Refund recorded"))}>{L("บันทึกการคืนเงิน", "Record refund")}</button>
+                        <button type="button" className="btn btn-danger" disabled={busy || !form.amount || !form.note?.trim()} onClick={() => act(() => api.payments.refund(w.work_order_id, form), L("ส่งคำขอคืนเงินแล้ว รอผู้ดูแลคนอื่นอนุมัติ", "Refund requested — another admin must approve it"))}>{L("ส่งคำขอคืนเงิน", "Send request")}</button>
                     </>
                 )}>
                     <div className="stack">
-                        <p className="small muted">{L("คืนได้ไม่เกิน", "Up to")} <Money value={w.payment.net_paid} /></p>
+                        <div className="notice info small">{L("การคืนเงินต้องผ่าน 2 คน: คุณส่งคำขอ แล้วผู้ดูแลอีกคนอนุมัติและยืนยันการโอนคืน ยอดในใบงานจะเปลี่ยนเมื่อโอนคืนแล้วเท่านั้น", "Refunds take two people: you request it, then another admin approves it and confirms the payout. The balance changes only once it is paid out.")}</div>
+                        <p className="small muted">{L("ขอคืนได้ไม่เกิน", "Up to")} <Money value={refundable} />{reserved > 0 ? L(` (มีคำขอค้างอยู่ ${fmt.money(reserved)})`, ` (${fmt.money(reserved)} already requested)`) : ""}</p>
                         <TextField type="number" min="1" step="1" label={L("จำนวนเงิน (บาท)", "Amount (THB)")} value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
                         <TextField as="textarea" label={L("เหตุผล (บังคับ)", "Reason (required)")} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
                     </div>

@@ -54,7 +54,9 @@ function seed() {
         { user_id: "u-cust-2", full_name: "นิดา รักษ์ดี", email: "nida@smartfix.test", phone: "089-765-4321", roles: ["CUSTOMER"] },
         { user_id: "u-tech-1", full_name: "อาทิตย์ ช่างไฟ", email: "technician@smartfix.test", phone: "082-111-2222", roles: ["TECHNICIAN"] },
         { user_id: "u-tech-2", full_name: "มาลี บอร์ดดี", email: "malee@smartfix.test", phone: "082-333-4444", roles: ["TECHNICIAN"] },
-        { user_id: "u-admin-1", full_name: "พิมพ์ ผู้ดูแล", email: "admin@smartfix.test", phone: "02-123-4567", roles: ["ADMIN"] }
+        { user_id: "u-admin-1", full_name: "พิมพ์ ผู้ดูแล", email: "admin@smartfix.test", phone: "02-123-4567", roles: ["ADMIN"] },
+        // Refunds need a second admin: the requester cannot approve or execute their own.
+        { user_id: "u-admin-2", full_name: "ก้อง ผู้จัดการ", email: "manager@smartfix.test", phone: "02-123-4568", roles: ["ADMIN"] }
     ];
 
     const categories = [
@@ -270,7 +272,8 @@ function seed() {
         quotations,
         parts,
         stockMovements,
-        payments
+        payments,
+        refunds: []
     };
 }
 
@@ -284,7 +287,17 @@ export function getDb() {
     } catch {
         db = seed();
     }
+    upgrade(db);
     return db;
+}
+
+/** Adds what newer versions expect to demo data saved by an older version. */
+function upgrade(data) {
+    if (!Array.isArray(data.refunds)) data.refunds = [];
+    if (!data.users.some((u) => u.user_id === "u-admin-2")) {
+        const manager = seed().users.find((u) => u.user_id === "u-admin-2");
+        if (manager) data.users.push(manager);
+    }
 }
 
 export function saveDb() {

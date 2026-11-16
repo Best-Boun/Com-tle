@@ -991,18 +991,89 @@ export const payments = {
         return respond(presentWo(wo, { detail: true }));
     }),
 
+    /**
+     * Files a refund REQUEST, like Payment-Service. The money only moves after
+     * another admin approves and executes it (see executeRefund).
+     */
     refund: handler(async (woId, { amount, note }) => {
         const user = requireRole("ADMIN");
         const wo = loadWo(woId, user);
         const n = Number(amount);
         if (!Number.isInteger(n) || n < 1) throw bad("จำนวนเงินต้องเป็นจำนวนเต็มบาท", "Amount must be a whole number of baht");
-        const sum = paymentSummary(woId);
-        if (n > sum.net_paid) throw bad(`คืนได้ไม่เกินยอดที่ชำระแล้ว (${sum.net_paid} บาท)`, `Refund cannot exceed the amount paid (${sum.net_paid} THB)`, 409);
+        const refundable = refundableAmount(woId);
+        if (n > refundable) throw bad(`คืนได้ไม่เกิน ${refundable} บาท (หักคำขอที่ค้างอยู่แล้ว)`, `Refund cannot exceed ${refundable} THB (after pending requests)`, 409);
         if (!note?.trim()) throw bad("กรุณาระบุเหตุผลการคืนเงิน", "A refund reason is required");
-        getDb().payments.push({ payment_id: newId(), work_order_id: woId, type: "REFUND", amount: n, method: "TRANSFER", recorded_by: user.user_id, note: note.trim(), created_at: now() });
+        getDb().refunds.push({
+            refund_id: newId(), work_order_id: woId, amount: n, currency: "THB", status: "REQUESTED",
+            reason: note.trim(), requested_by: user.user_id, requested_at: now(),
+            approved_by: null, approved_at: null, executed_by: null, completed_at: null,
+            rejected_by: null, rejection_reason: null, rejected_at: null
+        });
         return respond(presentWo(wo, { detail: true }));
+    }),
+
+    listRefunds: handler(async ({ status, work_order_id } = {}) => {
+        requireRole("ADMIN");
+        const db = getDb();
+        return respond(db.refunds
+            .filter((r) => (!status || r.status === status) && (!work_order_id || r.work_order_id === work_order_id))
+            .sort((a, b) => b.requested_at.localeCompare(a.requested_at))
+            .map((r) => {
+                const wo = db.workOrders.find((w) => w.work_order_id === r.work_order_id);
+                return {
+                    ...r,
+                    work_order_number: wo?.work_order_number,
+                    customer_name: wo?.customer_name,
+                    requested_by_name: userName(r.requested_by),
+                    approved_by_name: userName(r.approved_by)
+                };
+            }));
+    }),
+
+    approveRefund: handler(async (refundId) => {
+        const user = requireRole("ADMIN");
+        const refund = loadRefund(refundId);
+        if (refund.status !== "REQUESTED") throw bad("อนุมัติได้เฉพาะคำขอที่รออนุมัติ", "Only a requested refund can be approved", 409);
+        if (refund.requested_by === user.user_id) throw bad("ผู้อนุมัติต้องไม่ใช่ผู้ขอคืนเงิน", "A refund must be approved by someone other than the requester", 403);
+        Object.assign(refund, { status: "APPROVED", approved_by: user.user_id, approved_at: now() });
+        return respond(refund);
+    }),
+
+    rejectRefund: handler(async (refundId, { reason } = {}) => {
+        const user = requireRole("ADMIN");
+        const refund = loadRefund(refundId);
+        if (!["REQUESTED", "APPROVED"].includes(refund.status)) throw bad("ปฏิเสธได้เฉพาะคำขอที่ยังไม่คืนเงิน", "Only a requested or approved refund can be rejected", 409);
+        if (!reason?.trim()) throw bad("กรุณาระบุเหตุผล", "A rejection reason is required");
+        Object.assign(refund, { status: "REJECTED", rejected_by: user.user_id, rejection_reason: reason.trim(), rejected_at: now() });
+        return respond(refund);
+    }),
+
+    /** Manual provider: the executor confirms the money went back to the customer. */
+    executeRefund: handler(async (refundId) => {
+        const user = requireRole("ADMIN");
+        const refund = loadRefund(refundId);
+        if (refund.status !== "APPROVED") throw bad("ดำเนินการได้เฉพาะคำขอที่อนุมัติแล้ว", "Only an approved refund can be executed", 409);
+        if (refund.requested_by === user.user_id) throw bad("ผู้ดำเนินการคืนเงินต้องไม่ใช่ผู้ขอคืนเงิน", "A refund must be executed by someone other than the requester", 403);
+        const completedAt = now();
+        Object.assign(refund, { status: "COMPLETED", executed_by: user.user_id, completed_at: completedAt });
+        getDb().payments.push({ payment_id: refund.refund_id, work_order_id: refund.work_order_id, type: "REFUND", amount: refund.amount, method: "TRANSFER", recorded_by: user.user_id, note: refund.reason, created_at: completedAt });
+        return respond(refund);
     })
 };
+
+function loadRefund(refundId) {
+    const refund = getDb().refunds.find((r) => r.refund_id === refundId);
+    if (!refund) throw bad("ไม่พบคำขอคืนเงิน", "Refund not found", 404);
+    return refund;
+}
+
+/** Net paid minus refund requests that are still open (they reserve the money). */
+function refundableAmount(woId) {
+    const reserved = getDb().refunds
+        .filter((r) => r.work_order_id === woId && ["REQUESTED", "APPROVED"].includes(r.status))
+        .reduce((s, r) => s + r.amount, 0);
+    return Math.max(0, paymentSummary(woId).net_paid - reserved);
+}
 
 // ---------------------------------------------------------------- dashboard
 export const dashboard = {
@@ -1038,7 +1109,8 @@ export const demo = {
     accounts: [
         { role: "CUSTOMER", email: "customer@smartfix.test" },
         { role: "TECHNICIAN", email: "technician@smartfix.test" },
-        { role: "ADMIN", email: "admin@smartfix.test" }
+        { role: "ADMIN", email: "admin@smartfix.test" },
+        { role: "ADMIN", email: "manager@smartfix.test" }
     ],
     password: DEMO_PASSWORD
 };
