@@ -38,7 +38,10 @@ const THAI = {
     "Administrators cannot modify their own roles": "เปลี่ยนสิทธิ์ของตัวเองไม่ได้",
     "Cannot disable the last active administrator": "ปิดผู้ดูแลคนสุดท้ายไม่ได้",
     "Invalid account status transition": "เปลี่ยนสถานะบัญชีนี้ไม่ได้",
-    "Too many requests": "ทำรายการบ่อยเกินไป กรุณารอสักครู่"
+    "Too many requests": "ทำรายการบ่อยเกินไป กรุณารอสักครู่",
+    "Cannot remove the user's final role": "ต้องเหลือสิทธิ์อย่างน้อย 1 อย่าง",
+    "User does not have this role": "บัญชีนี้ไม่มีสิทธิ์นี้",
+    "Invalid role assignment": "ให้สิทธิ์นี้จากหน้าเว็บไม่ได้"
 };
 
 function translate(en) {

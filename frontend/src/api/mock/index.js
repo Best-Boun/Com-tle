@@ -174,6 +174,53 @@ export const staff = {
         if (!user) throw bad("ไม่พบบัญชีนี้", "User not found", 404);
         user.status = active ? "ACTIVE" : "DISABLED";
         return respond({ user_id: userId, status: user.status });
+    }),
+
+    listUsers: handler(async ({ role, status, search, page = 1, pageSize = 20 } = {}) => {
+        requireRole("ADMIN");
+        const q = String(search || "").trim().toLowerCase();
+        const all = getDb().users
+            .map(toStaff)
+            .filter((u) => !role || u.roles.includes(role))
+            .filter((u) => !status || u.status === status)
+            .filter((u) => !q || [u.email, u.full_name, u.phone].some((v) => v?.toLowerCase().includes(q)))
+            .sort((a, b) => a.full_name.localeCompare(b.full_name, "th"));
+        const start = (page - 1) * pageSize;
+        return respond({
+            items: all.slice(start, start + pageSize),
+            pagination: { page, page_size: pageSize, total: all.length, total_pages: Math.ceil(all.length / pageSize) }
+        });
+    }),
+
+    addRole: handler(async (userId, roleCode) => {
+        const me = requireRole("ADMIN");
+        if (!["CUSTOMER", "TECHNICIAN"].includes(roleCode)) throw bad("ให้สิทธิ์นี้จากหน้าเว็บไม่ได้", "This role can't be granted here", 400);
+        if (userId === me.user_id) throw bad("เปลี่ยนสิทธิ์ของตัวเองไม่ได้", "You cannot change your own roles", 403);
+        const user = getDb().users.find((u) => u.user_id === userId);
+        if (!user) throw bad("ไม่พบบัญชีนี้", "User not found", 404);
+        if (user.roles.includes(roleCode)) throw bad("บัญชีนี้มีสิทธิ์นี้อยู่แล้ว", "User already has this role", 409);
+        user.roles = [...user.roles, roleCode];
+        return respond({ user_id: userId, role_code: roleCode });
+    }),
+
+    removeRole: handler(async (userId, roleCode) => {
+        const me = requireRole("ADMIN");
+        if (!["CUSTOMER", "TECHNICIAN"].includes(roleCode)) throw bad("ถอนสิทธิ์นี้จากหน้าเว็บไม่ได้", "This role can't be removed here", 400);
+        if (userId === me.user_id) throw bad("เปลี่ยนสิทธิ์ของตัวเองไม่ได้", "You cannot change your own roles", 403);
+        const user = getDb().users.find((u) => u.user_id === userId);
+        if (!user) throw bad("ไม่พบบัญชีนี้", "User not found", 404);
+        if (!user.roles.includes(roleCode)) throw bad("บัญชีนี้ไม่มีสิทธิ์นี้", "User does not have this role", 404);
+        if (user.roles.length === 1) throw bad("ต้องเหลือสิทธิ์อย่างน้อย 1 อย่าง", "Cannot remove the user's final role", 409);
+        user.roles = user.roles.filter((r) => r !== roleCode);
+        return respond({ user_id: userId, role_code: roleCode });
+    }),
+
+    unlock: handler(async (userId) => {
+        requireRole("ADMIN");
+        const user = getDb().users.find((u) => u.user_id === userId);
+        if (!user) throw bad("ไม่พบบัญชีนี้", "User not found", 404);
+        user.status = "ACTIVE";
+        return respond({ user_id: userId, status: "ACTIVE" });
     })
 };
 
