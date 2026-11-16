@@ -176,3 +176,43 @@
 .filters .field {
     min-width: 180px;
 }
+
+/* All users */
+.role-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s1);
+}
+
+.pager {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--s3);
+    margin-top: var(--s4);
+}
+
+.role-option {
+    display: flex;
+    gap: var(--s3);
+    align-items: flex-start;
+    padding: var(--s3) var(--s4);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    cursor: pointer;
+}
+
+.role-option:has(input:checked) {
+    border-color: var(--green);
+    background: var(--green-tint);
+}
+
+.role-option input {
+    margin-top: 6px;
+    accent-color: var(--green);
+}
+
+.role-option > span {
+    display: grid;
+}

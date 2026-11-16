@@ -135,6 +135,7 @@ const STAFF_NAV = {
         { to: "/admin/catalog", icon: Icon.Tag, th: "บริการและราคา", en: "Services & prices" },
         { to: "/admin/inventory", icon: Icon.Box, th: "คลังอะไหล่", en: "Parts stock" },
         { to: "/admin/payments", icon: Icon.Cash, th: "การเงิน", en: "Payments" },
+        { to: "/admin/users", icon: Icon.Users, th: "ผู้ใช้ทั้งหมด", en: "All users" },
         { to: "/admin/staff", icon: Icon.User, th: "บัญชีช่าง", en: "Technicians" }
     ],
     TECHNICIAN: [
