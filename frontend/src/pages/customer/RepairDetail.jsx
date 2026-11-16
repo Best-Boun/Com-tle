@@ -55,7 +55,9 @@ export default function RepairDetail() {
             )}
             {w.status === "COMPLETED" && !w.handed_over_at && (
                 <div className="notice ok">
-                    {w.payment.balance > 0
+                    {w.payment.unavailable
+                        ? L("ซ่อมเสร็จและทดสอบแล้ว ติดต่อร้านเพื่อรับเครื่องได้เลย", "Repair done and tested — contact the shop to pick up your device.")
+                        : w.payment.balance > 0
                         ? L(`ซ่อมเสร็จและทดสอบแล้ว ชำระยอดค้าง ${fmt.money(w.payment.balance)} แล้วมารับเครื่องได้เลย`, `Repair done and tested. Pay the remaining ${fmt.money(w.payment.balance)} and pick up your device.`)
                         : L("ซ่อมเสร็จและทดสอบแล้ว มารับเครื่องได้ที่ร้าน", "Repair done and tested — ready for pick-up.")}
                 </div>
