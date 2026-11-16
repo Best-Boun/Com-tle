@@ -11,6 +11,7 @@ const allowedMetadataKeys = new Set([
     "revoked",
     "role_code",
     "role_codes",
+    "replaced_role_codes",
     "to_status"
 ]);
 const metadataSchema = z.record(

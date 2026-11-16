@@ -162,6 +162,13 @@ function createMutationDb({
                 password_hash: "hash",
                 phone: null,
                 status: "ACTIVE"
+            },
+            {
+                user_id: "legacy-1",
+                email: "legacy-1@example.com",
+                password_hash: "hash",
+                phone: null,
+                status: "ACTIVE"
             }
         ],
         roles: [
@@ -173,8 +180,9 @@ function createMutationDb({
             { user_id: "admin-1", role_id: "role-admin", assigned_by: null },
             { user_id: "admin-2", role_id: "role-admin", assigned_by: null },
             { user_id: "target-1", role_id: "role-customer", assigned_by: null },
-            { user_id: "target-1", role_id: "role-technician", assigned_by: null },
-            { user_id: "target-2", role_id: "role-admin", assigned_by: null }
+            { user_id: "target-2", role_id: "role-admin", assigned_by: null },
+            { user_id: "legacy-1", role_id: "role-customer", assigned_by: null },
+            { user_id: "legacy-1", role_id: "role-technician", assigned_by: null }
         ],
         user_audit_logs: []
     };
@@ -532,38 +540,53 @@ test("status update rejects LOCKED assignment, invalid transitions, self-change,
     );
 });
 
-test("role assignment records actor and validates roles, duplicates, and self changes", async () => {
+function rolesOf(db, userId) {
+    return db.getState().user_roles
+        .filter((assignment) => assignment.user_id === userId)
+        .map((assignment) => assignment.role_id)
+        .sort();
+}
+
+test("role assignment replaces the user's one role and validates roles, duplicates, admins and self changes", async () => {
     const db = createMutationDb();
     const service = createUserAdministrationService({ db });
 
     await assert.rejects(
-        service.assignRole("target-1", "admin-1", { role_code: "TECHNICIAN" }),
-        (error) => error.statusCode === 409
+        service.assignRole("target-1", "admin-1", { role_code: "CUSTOMER" }),
+        (error) => error.statusCode === 409 && error.message === "User already has this role"
     );
     assert.deepEqual(await service.assignRole(
-        "target-2",
-        "admin-1",
-        { role_code: "CUSTOMER" }
-    ), { user_id: "target-2", role_code: "CUSTOMER" });
-    assert.deepEqual(await service.assignRole(
-        "target-2",
+        "target-1",
         "admin-1",
         { role_code: "TECHNICIAN" }
-    ), { user_id: "target-2", role_code: "TECHNICIAN" });
-    assert.ok(db.getState().user_audit_logs.some((event) =>
-        event.action === "ADMIN.USER_ROLE_ASSIGNED"
+    ), { user_id: "target-1", role_code: "TECHNICIAN" });
+    assert.deepEqual(rolesOf(db, "target-1"), ["role-technician"]);
+    assert.ok(db.getState().user_roles.some((assignment) =>
+        assignment.user_id === "target-1"
+        && assignment.role_id === "role-technician"
+        && assignment.assigned_by === "admin-1"
     ));
-    for (const roleId of ["role-customer", "role-technician"]) {
-        assert.ok(db.getState().user_roles.some((assignment) =>
-            assignment.user_id === "target-2"
-            && assignment.role_id === roleId
-            && assignment.assigned_by === "admin-1"
-        ));
-    }
+    const assigned = db.getState().user_audit_logs
+        .filter((event) => event.action === "ADMIN.USER_ROLE_ASSIGNED");
+    assert.equal(assigned.at(-1).metadata.role_code, "TECHNICIAN");
+    assert.deepEqual(assigned.at(-1).metadata.replaced_role_codes, ["CUSTOMER"]);
+
+    await service.assignRole("target-1", "admin-1", { role_code: "CUSTOMER" });
+    assert.deepEqual(rolesOf(db, "target-1"), ["role-customer"]);
+
+    // An account that still has two roles is left with exactly the chosen one.
+    await service.assignRole("legacy-1", "admin-1", { role_code: "TECHNICIAN" });
+    assert.deepEqual(rolesOf(db, "legacy-1"), ["role-technician"]);
+
+    await assert.rejects(
+        service.assignRole("target-2", "admin-1", { role_code: "CUSTOMER" }),
+        (error) => error.statusCode === 409 && error.message === "Administrator roles cannot be changed"
+    );
+    assert.deepEqual(rolesOf(db, "target-2"), ["role-admin"]);
 
     for (const roleCode of ["ADMIN", "INVALID"]) {
         await assert.rejects(
-            service.assignRole("target-2", "admin-1", { role_code: roleCode }),
+            service.assignRole("target-1", "admin-1", { role_code: roleCode }),
             (error) => error.statusCode === 400
         );
     }
@@ -577,35 +600,26 @@ test("role removal protects the final role and rejects self/admin role changes",
     const db = createMutationDb();
     const service = createUserAdministrationService({ db });
 
-    await service.assignRole("target-2", "admin-1", { role_code: "CUSTOMER" });
-    await service.assignRole("target-2", "admin-1", { role_code: "TECHNICIAN" });
+    await assert.rejects(
+        service.removeRole("target-1", "admin-1", "CUSTOMER"),
+        (error) => error.statusCode === 409
+    );
+    await assert.rejects(
+        service.removeRole("target-1", "admin-1", "TECHNICIAN"),
+        (error) => error.statusCode === 404
+    );
+    assert.deepEqual(rolesOf(db, "target-1"), ["role-customer"]);
+
     assert.deepEqual(await service.removeRole(
-        "target-2",
+        "legacy-1",
         "admin-1",
         "TECHNICIAN"
-    ), { user_id: "target-2", role_code: "TECHNICIAN" });
+    ), { user_id: "legacy-1", role_code: "TECHNICIAN" });
     assert.ok(db.getState().user_audit_logs.some((event) =>
         event.action === "ADMIN.USER_ROLE_REMOVED"
     ));
-    assert.deepEqual(await service.removeRole(
-        "target-2",
-        "admin-1",
-        "CUSTOMER"
-    ), { user_id: "target-2", role_code: "CUSTOMER" });
+    assert.deepEqual(rolesOf(db, "legacy-1"), ["role-customer"]);
 
-    assert.deepEqual(await service.removeRole(
-        "target-1",
-        "admin-1",
-        "CUSTOMER"
-    ), { user_id: "target-1", role_code: "CUSTOMER" });
-    assert.ok(db.getState().user_roles.some((row) =>
-        row.user_id === "target-1" && row.role_id === "role-technician"
-    ));
-
-    await assert.rejects(
-        service.removeRole("target-1", "admin-1", "TECHNICIAN"),
-        (error) => error.statusCode === 409
-    );
     await assert.rejects(
         service.removeRole("admin-1", "admin-1", "ADMIN"),
         (error) => error.statusCode === 400
@@ -634,7 +648,7 @@ test("status and role mutations roll back on database failure", async () => {
     const beforeRoles = roleDb.getState();
     await assert.rejects(
         createUserAdministrationService({ db: roleDb })
-            .assignRole("target-2", "admin-1", { role_code: "CUSTOMER" }),
+            .assignRole("target-1", "admin-1", { role_code: "TECHNICIAN" }),
         (error) => error.statusCode === 503
     );
     assert.deepEqual(roleDb.getState(), beforeRoles);
@@ -653,14 +667,15 @@ test("rejected admin mutations are audited as failures; invalid input is not", a
         [() => service.updateUserStatus("missing", "admin-1", { status: "DISABLED" }, "adm:3"),
             404, "ADMIN.USER_STATUS_CHANGED", "admin-1", "missing",
             { to_status: "DISABLED" }, "User not found"],
-        [() => service.assignRole("target-1", "admin-1", { role_code: "TECHNICIAN" }, "adm:4"),
+        [() => service.assignRole("target-1", "admin-1", { role_code: "CUSTOMER" }, "adm:4"),
             409, "ADMIN.USER_ROLE_ASSIGNED", "admin-1", "target-1",
-            { role_code: "TECHNICIAN" }, "User already has this role"],
-        [() => service.removeRole("target-1", "admin-1", "CUSTOMER", "adm:5"),
-            200, null],
-        [() => service.removeRole("target-1", "admin-1", "TECHNICIAN", "adm:6"),
+            { role_code: "CUSTOMER" }, "User already has this role"],
+        [() => service.removeRole("target-1", "admin-1", "TECHNICIAN", "adm:5"),
+            404, "ADMIN.USER_ROLE_REMOVED", "admin-1", "target-1",
+            { role_code: "TECHNICIAN" }, "User does not have this role"],
+        [() => service.removeRole("target-1", "admin-1", "CUSTOMER", "adm:6"),
             409, "ADMIN.USER_ROLE_REMOVED", "admin-1", "target-1",
-            { role_code: "TECHNICIAN" }, "Cannot remove the user's final role"]
+            { role_code: "CUSTOMER" }, "Cannot remove the user's final role"]
     ];
 
     for (const [run, status, action, actor, target, metadata, reason] of failures) {

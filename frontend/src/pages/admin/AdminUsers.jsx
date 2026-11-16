@@ -7,7 +7,8 @@ import { Empty, ErrorNotice, Loading, Modal, PageHead, useAction } from "../../c
 import "./admin.css";
 
 const PAGE_SIZE = 20;
-// User Service lets admins grant or remove only these two; ADMIN is set in the database.
+// One account has exactly one role. Admins can switch an account between these
+// two; ADMIN is set in the database and can't be changed here.
 const EDITABLE_ROLES = ["CUSTOMER", "TECHNICIAN"];
 const ROLE_TONE = { CUSTOMER: "tone-blue", TECHNICIAN: "tone-green", ADMIN: "tone-amber" };
 
@@ -26,8 +27,8 @@ export default function AdminUsers() {
     const [searchInput, setSearchInput] = useState("");
     const [search, setSearch] = useState("");
     const [page, setPage] = useState(1);
-    const [editing, setEditing] = useState(null); // user whose roles are being edited
-    const [picked, setPicked] = useState([]);
+    const [editing, setEditing] = useState(null); // user whose role is being changed
+    const [picked, setPicked] = useState("");
     const [run, busy] = useAction();
 
     // Search after the admin stops typing, and go back to page 1 on any filter change.
@@ -59,22 +60,19 @@ export default function AdminUsers() {
     }
 
     function openRoles(u) {
-        setPicked(u.roles.filter((r) => EDITABLE_ROLES.includes(r)));
+        setPicked(u.roles.length === 1 && EDITABLE_ROLES.includes(u.roles[0]) ? u.roles[0] : "");
         setEditing(u);
     }
 
-    const keepsAdmin = editing?.roles.includes("ADMIN");
-    const nothingLeft = picked.length === 0 && !keepsAdmin;
+    const isAdmin = editing?.roles.includes("ADMIN");
+    // Older accounts may still hold two roles; saving leaves them with just one.
+    const unchanged = editing && editing.roles.length === 1 && editing.roles[0] === picked;
 
-    async function saveRoles() {
-        const current = editing.roles.filter((r) => EDITABLE_ROLES.includes(r));
-        const toAdd = picked.filter((r) => !current.includes(r));
-        const toRemove = current.filter((r) => !picked.includes(r));
-        const ok = await run(async () => {
-            // Add first so the account never drops to zero roles in between.
-            for (const r of toAdd) await api.staff.addRole(editing.user_id, r);
-            for (const r of toRemove) await api.staff.removeRole(editing.user_id, r);
-        }, L("บันทึกสิทธิ์แล้ว", "Roles saved")).then(() => true).catch(() => false);
+    async function saveRole() {
+        const ok = await run(
+            () => api.staff.setRole(editing.user_id, picked),
+            L(`เปลี่ยนเป็น${t(`role.${picked}`)}แล้ว`, `Changed to ${t(`role.${picked}`)}`)
+        ).then(() => true).catch(() => false);
         if (ok) setEditing(null);
         list.reload();
     }
@@ -87,7 +85,7 @@ export default function AdminUsers() {
         <div>
             <PageHead
                 title={L("ผู้ใช้ทั้งหมด", "All users")}
-                lede={L("ดูบัญชีลูกค้า ช่าง และผู้ดูแล เปิด/ปิดบัญชี และแก้สิทธิ์การใช้งาน", "See every account, enable or disable it, and change its roles.")}
+                lede={L("ดูบัญชีลูกค้า ช่าง และผู้ดูแล เปิด/ปิดบัญชี และเปลี่ยนบทบาท (1 บัญชีมี 1 บทบาท)", "See every account, enable or disable it, and change its role (one role per account).")}
             />
 
             <div className="tabs" role="tablist" style={{ marginBottom: 16 }}>
@@ -131,7 +129,7 @@ export default function AdminUsers() {
                                 <th>{L("ชื่อ", "Name")}</th>
                                 <th>{L("อีเมล", "Email")}</th>
                                 <th>{L("โทร", "Phone")}</th>
-                                <th>{L("สิทธิ์", "Roles")}</th>
+                                <th>{L("บทบาท", "Role")}</th>
                                 <th>{L("สถานะ", "Status")}</th>
                                 <th />
                             </tr>
@@ -151,7 +149,7 @@ export default function AdminUsers() {
                                     <td className="right">
                                         {!isMe(u) && (
                                             <div className="btn-row" style={{ justifyContent: "flex-end", flexWrap: "nowrap" }}>
-                                                <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => openRoles(u)}>{L("แก้สิทธิ์", "Roles")}</button>
+                                                {!u.roles.includes("ADMIN") && <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => openRoles(u)}>{L("เปลี่ยนบทบาท", "Change role")}</button>}
                                                 <button type="button" className={`btn btn-sm ${u.status === "ACTIVE" ? "btn-danger" : "btn-secondary"}`} disabled={busy} onClick={() => changeStatus(u)}>
                                                     {u.status === "ACTIVE" ? L("ปิดบัญชี", "Disable") : u.status === "LOCKED" ? L("ปลดล็อก", "Unlock") : L("เปิดใช้", "Enable")}
                                                 </button>
@@ -179,22 +177,23 @@ export default function AdminUsers() {
 
             {editing && (
                 <Modal
-                    title={L(`สิทธิ์ของ ${editing.full_name}`, `Roles for ${editing.full_name}`)}
+                    title={L(`บทบาทของ ${editing.full_name}`, `Role for ${editing.full_name}`)}
                     onClose={() => setEditing(null)}
                     footer={(
                         <>
                             <button type="button" className="btn btn-secondary" onClick={() => setEditing(null)}>{t("common.cancel")}</button>
-                            <button type="button" className="btn btn-primary" disabled={busy || nothingLeft} onClick={saveRoles}>{L("บันทึกสิทธิ์", "Save roles")}</button>
+                            <button type="button" className="btn btn-primary" disabled={busy || isAdmin || !picked || unchanged} onClick={saveRole}>{L("บันทึก", "Save")}</button>
                         </>
                     )}
                 >
                     <div className="form-grid">
-                        {EDITABLE_ROLES.map((r) => (
+                        {!isAdmin && EDITABLE_ROLES.map((r) => (
                             <label key={r} className="role-option">
                                 <input
-                                    type="checkbox"
-                                    checked={picked.includes(r)}
-                                    onChange={(e) => setPicked((p) => (e.target.checked ? [...p, r] : p.filter((x) => x !== r)))}
+                                    type="radio"
+                                    name="account-role"
+                                    checked={picked === r}
+                                    onChange={() => setPicked(r)}
                                 />
                                 <span>
                                     <strong>{t(`role.${r}`)}</strong>
@@ -206,14 +205,16 @@ export default function AdminUsers() {
                                 </span>
                             </label>
                         ))}
-                        {keepsAdmin && (
+                        {isAdmin && (
                             <p className="small muted" style={{ margin: 0 }}>
-                                {L("บัญชีนี้เป็นผู้ดูแลร้าน สิทธิ์ผู้ดูแลแก้จากหน้านี้ไม่ได้", "This account is a shop admin. The admin role can't be changed here.")}
+                                {L("บัญชีนี้เป็นผู้ดูแลร้าน เปลี่ยนบทบาทจากหน้านี้ไม่ได้", "This account is a shop admin. Its role can't be changed here.")}
                             </p>
                         )}
-                        {nothingLeft && <div className="notice error" role="alert">{L("ต้องเลือกอย่างน้อย 1 สิทธิ์", "Pick at least one role")}</div>}
+                        {!isAdmin && editing.roles.length > 1 && (
+                            <div className="notice warn small">{L("บัญชีนี้มีหลายบทบาทจากระบบเดิม เลือกบทบาทเดียวที่ต้องการเก็บไว้", "This older account has several roles. Pick the one to keep.")}</div>
+                        )}
                         <p className="small faint" style={{ margin: 0 }}>
-                            {L("สิทธิ์ใหม่มีผลเมื่อเจ้าของบัญชีเข้าสู่ระบบครั้งถัดไป", "New roles apply the next time the person signs in.")}
+                            {L("1 บัญชีมีได้ 1 บทบาท บทบาทเดิมจะถูกแทนที่ และมีผลเมื่อเจ้าของบัญชีเข้าสู่ระบบครั้งถัดไป", "One account has one role. The old role is replaced; the change applies the next time the person signs in.")}
                         </p>
                     </div>
                 </Modal>

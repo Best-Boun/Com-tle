@@ -192,26 +192,16 @@ export const staff = {
         });
     }),
 
-    addRole: handler(async (userId, roleCode) => {
+    /** One user, one role, like User Service: the new role replaces the old one. */
+    setRole: handler(async (userId, roleCode) => {
         const me = requireRole("ADMIN");
-        if (!["CUSTOMER", "TECHNICIAN"].includes(roleCode)) throw bad("ให้สิทธิ์นี้จากหน้าเว็บไม่ได้", "This role can't be granted here", 400);
-        if (userId === me.user_id) throw bad("เปลี่ยนสิทธิ์ของตัวเองไม่ได้", "You cannot change your own roles", 403);
+        if (!["CUSTOMER", "TECHNICIAN"].includes(roleCode)) throw bad("ตั้งบทบาทนี้จากหน้าเว็บไม่ได้", "This role can't be set here", 400);
+        if (userId === me.user_id) throw bad("เปลี่ยนบทบาทของตัวเองไม่ได้", "You cannot change your own role", 403);
         const user = getDb().users.find((u) => u.user_id === userId);
         if (!user) throw bad("ไม่พบบัญชีนี้", "User not found", 404);
-        if (user.roles.includes(roleCode)) throw bad("บัญชีนี้มีสิทธิ์นี้อยู่แล้ว", "User already has this role", 409);
-        user.roles = [...user.roles, roleCode];
-        return respond({ user_id: userId, role_code: roleCode });
-    }),
-
-    removeRole: handler(async (userId, roleCode) => {
-        const me = requireRole("ADMIN");
-        if (!["CUSTOMER", "TECHNICIAN"].includes(roleCode)) throw bad("ถอนสิทธิ์นี้จากหน้าเว็บไม่ได้", "This role can't be removed here", 400);
-        if (userId === me.user_id) throw bad("เปลี่ยนสิทธิ์ของตัวเองไม่ได้", "You cannot change your own roles", 403);
-        const user = getDb().users.find((u) => u.user_id === userId);
-        if (!user) throw bad("ไม่พบบัญชีนี้", "User not found", 404);
-        if (!user.roles.includes(roleCode)) throw bad("บัญชีนี้ไม่มีสิทธิ์นี้", "User does not have this role", 404);
-        if (user.roles.length === 1) throw bad("ต้องเหลือสิทธิ์อย่างน้อย 1 อย่าง", "Cannot remove the user's final role", 409);
-        user.roles = user.roles.filter((r) => r !== roleCode);
+        if (has(user, "ADMIN")) throw bad("เปลี่ยนบทบาทของบัญชีผู้ดูแลร้านไม่ได้", "Administrator roles cannot be changed", 409);
+        if (user.roles.length === 1 && user.roles[0] === roleCode) throw bad("บัญชีนี้มีบทบาทนี้อยู่แล้ว", "User already has this role", 409);
+        user.roles = [roleCode];
         return respond({ user_id: userId, role_code: roleCode });
     }),
 

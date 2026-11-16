@@ -2,12 +2,11 @@
  * Staff (technician) accounts through User Service's existing endpoints.
  *
  * User Service has no "create staff account" endpoint, so an admin creates a
- * technician in three calls:
- *   1. POST   /auth/register                         -> new user (role CUSTOMER)
- *   2. PUT    /admin/users/:id/roles/TECHNICIAN       -> add technician role
- *   3. DELETE /admin/users/:id/roles/CUSTOMER         -> drop customer role
+ * technician in two calls:
+ *   1. POST /auth/register                      -> new user (role CUSTOMER)
+ *   2. PUT  /admin/users/:id/roles/TECHNICIAN    -> REPLACES the role (one role per user)
  * The customers row created by register stays: User Service keeps the
- * display name there. Both role calls are audit-logged by User Service.
+ * display name there. The role change is audit-logged by User Service.
  */
 import { ApiError } from "../mock/db.js";
 import { query, request } from "./client.js";
@@ -25,17 +24,12 @@ function toStaff(item) {
     };
 }
 
-/** Give an existing user the technician role and take away the customer role. */
+/** Make an existing user a technician. Their previous role is replaced. */
 async function makeTechnician(userId) {
     try {
         await request(`/users/admin/users/${userId}/roles/${STAFF_ROLE}`, { method: "PUT" });
     } catch (error) {
-        if (error.status !== 409) throw error; // 409 = already a technician
-    }
-    try {
-        await request(`/users/admin/users/${userId}/roles/CUSTOMER`, { method: "DELETE" });
-    } catch (error) {
-        if (error.status !== 404) throw error; // 404 = was not a customer
+        if (error.status !== 409 || !/already has this role/i.test(error.message)) throw error;
     }
 }
 
@@ -98,13 +92,12 @@ export const staff = {
         };
     },
 
-    /** User Service only lets admins grant or remove CUSTOMER and TECHNICIAN. */
-    async addRole(userId, roleCode) {
+    /**
+     * One user, one role: User Service REPLACES the current role with this one.
+     * Only CUSTOMER and TECHNICIAN can be set; admin accounts can't be changed.
+     */
+    async setRole(userId, roleCode) {
         await request(`/users/admin/users/${userId}/roles/${roleCode}`, { method: "PUT" });
-    },
-
-    async removeRole(userId, roleCode) {
-        await request(`/users/admin/users/${userId}/roles/${roleCode}`, { method: "DELETE" });
     },
 
     /** Unlock an account that was locked after too many failed sign-ins. */
