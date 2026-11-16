@@ -359,13 +359,25 @@ function createUserAdministrationService({ db }) {
                 if (!role) {
                     throw new AppError("Role not found", 404);
                 }
-                const existing = await trx("user_roles")
-                    .where({ user_id: userId, role_id: role.role_id })
-                    .first();
-                if (existing) {
+                // One user has exactly one role: assigning a role REPLACES the
+                // current one (CUSTOMER <-> TECHNICIAN). Admin accounts are
+                // managed in the database, never changed from here.
+                const current = await trx("user_roles as ur")
+                    .join("roles as r", "ur.role_id", "r.role_id")
+                    .select("ur.role_id", "r.role_code")
+                    .where({ "ur.user_id": userId })
+                    .forUpdate();
+                if (current.some((assignment) => assignment.role_code === USER_ROLES.ADMIN)) {
+                    throw new AppError("Administrator roles cannot be changed", 409);
+                }
+                if (current.length === 1 && current[0].role_id === role.role_id) {
                     throw new AppError("User already has this role", 409);
                 }
+                const replaced = current
+                    .filter((assignment) => assignment.role_id !== role.role_id)
+                    .map((assignment) => assignment.role_code);
 
+                await trx("user_roles").where({ user_id: userId }).delete();
                 await trx("user_roles").insert({
                     user_id: userId,
                     role_id: role.role_id,
@@ -378,7 +390,7 @@ function createUserAdministrationService({ db }) {
                     target_entity_id: userId,
                     outcome: "SUCCESS",
                     request_id: requestId,
-                    metadata: { role_code: role.role_code }
+                    metadata: { role_code: role.role_code, replaced_role_codes: replaced }
                 });
                 return { user_id: userId, role_code: role.role_code };
             });

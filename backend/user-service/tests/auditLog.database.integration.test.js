@@ -296,17 +296,22 @@ test("existing producers write their audit rows to MySQL user_audit_logs", {
             [adminId, "DISABLED", "ACTIVE"]
         ]);
 
+        // One role per user: assigning TECHNICIAN replaces CUSTOMER, and back.
         await administration.assignRole(
             userId, adminId, { role_code: USER_ROLES.TECHNICIAN }, requestId
         );
-        await administration.removeRole(userId, adminId, USER_ROLES.TECHNICIAN, requestId);
-        const [assignedAudit] = await auditRows(userId, "ADMIN.USER_ROLE_ASSIGNED");
-        const [removedAudit] = await auditRows(userId, "ADMIN.USER_ROLE_REMOVED");
-        assert.equal(assignedAudit.actor_user_id, adminId);
-        assert.equal(parseMetadata(assignedAudit.metadata).role_code, USER_ROLES.TECHNICIAN);
-        assert.equal(removedAudit.actor_user_id, adminId);
-        assert.equal(parseMetadata(removedAudit.metadata).role_code, USER_ROLES.TECHNICIAN);
-        assert.ok([assignedAudit, removedAudit].every((row) =>
+        await administration.assignRole(
+            userId, adminId, { role_code: USER_ROLES.CUSTOMER }, requestId
+        );
+        const assignedAudits = await auditRows(userId, "ADMIN.USER_ROLE_ASSIGNED");
+        assert.deepEqual(assignedAudits.map((row) => {
+            const metadata = parseMetadata(row.metadata);
+            return [row.actor_user_id, metadata.role_code, metadata.replaced_role_codes];
+        }), [
+            [adminId, USER_ROLES.TECHNICIAN, [USER_ROLES.CUSTOMER]],
+            [adminId, USER_ROLES.CUSTOMER, [USER_ROLES.TECHNICIAN]]
+        ]);
+        assert.ok(assignedAudits.every((row) =>
             parseMetadata(row.metadata).request_id === requestId));
 
         // A rejected admin mutation (self status change) is audited as FAILURE.
