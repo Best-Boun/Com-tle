@@ -11,7 +11,10 @@ export const SHOP = {
     timezone: "Asia/Bangkok",
     slotTimes: ["09:00", "10:00", "11:00", "13:00", "14:00", "15:00", "16:00"],
     slotCapacity: 2,
-    maxDaysAhead: 30
+    maxDaysAhead: 30,
+    // Every booking pays this before its slot is confirmed (Payment-Service PAYMENT_DEPOSIT_AMOUNT).
+    depositAmount: 200,
+    depositHoldMinutes: 10
 };
 
 export const DEMO_PASSWORD = "demo1234";
@@ -273,7 +276,8 @@ function seed() {
         parts,
         stockMovements,
         payments,
-        refunds: []
+        refunds: [],
+        deposits: []
     };
 }
 
@@ -294,6 +298,7 @@ export function getDb() {
 /** Adds what newer versions expect to demo data saved by an older version. */
 function upgrade(data) {
     if (!Array.isArray(data.refunds)) data.refunds = [];
+    if (!Array.isArray(data.deposits)) data.deposits = [];
     if (!data.users.some((u) => u.user_id === "u-admin-2")) {
         const manager = seed().users.find((u) => u.user_id === "u-admin-2");
         if (manager) data.users.push(manager);

@@ -36,6 +36,33 @@ function createWorkOrderLoader(baseUrl) {
     };
 }
 
+/** Reads a booking from Booking-Service with the caller's token (it checks access). */
+function createBookingLoader(baseUrl) {
+    const root = baseUrl.replace(/\/$/, "");
+    return async function loadBooking(bookingId, authorization) {
+        if (!authorization) {
+            throw new AppError("Authentication required", 401);
+        }
+        let response;
+        try {
+            response = await fetch(`${root}/${encodeURIComponent(bookingId)}`, {
+                headers: { authorization, accept: "application/json" },
+                signal: AbortSignal.timeout(5000)
+            });
+        } catch {
+            throw new AppError("Booking Service is unavailable", 503);
+        }
+        const payload = await response.json().catch(() => null);
+        if (response.status === 404 || response.status === 403) {
+            throw new AppError("Booking not found", 404);
+        }
+        if (!response.ok || payload?.success === false) {
+            throw new AppError("Booking Service is unavailable", 503);
+        }
+        return payload?.data || null;
+    };
+}
+
 function startServer({ env = process.env, database } = {}) {
     if (env === process.env) {
         dotenv.config({ path: path.resolve(__dirname, ".env") });
@@ -48,7 +75,9 @@ function startServer({ env = process.env, database } = {}) {
         db,
         requestPermission: adapter.requestPermission,
         requestCustomerId: adapter.requestCustomerId,
-        loadWorkOrder: createWorkOrderLoader(env.PAYMENT_REPAIR_SERVICE_URL || "http://localhost:3004")
+        loadWorkOrder: createWorkOrderLoader(env.PAYMENT_REPAIR_SERVICE_URL || "http://localhost:3004"),
+        loadBooking: createBookingLoader(env.PAYMENT_BOOKING_SERVICE_URL || "http://localhost:3002"),
+        depositAmount: Number(env.PAYMENT_DEPOSIT_AMOUNT || 200)
     });
     const paymentRouter = createPaymentRouter({
         paymentService,

@@ -15,6 +15,10 @@ const { successResponse } = require("../../../shared/utils/responseFormatter");
 //   GET  /my                       the caller's own bills and payments
 //   POST /checkout                 customer pays an approved quotation online
 //                                  (mock provider, Idempotency-Key)
+//   POST /deposits                 customer pays a booking's deposit (Idempotency-Key)
+//   GET  /deposits                 deposits (the shop: all; a customer: own)
+//   GET  /deposits/:bookingId      one booking's deposit
+//   POST /deposits/:bookingId/settle   refund / forfeit / apply it, following the booking
 function createPaymentRouter({ paymentService, requireUserAuth }) {
     if (!paymentService || typeof requireUserAuth !== "function") {
         throw new Error("Payment service and user authentication are required");
@@ -49,6 +53,14 @@ function createPaymentRouter({ paymentService, requireUserAuth }) {
         (req) => paymentService.checkout(req.auth, req.body, key(req), req.get("authorization"))));
     router.get("/my", handle(200, "My payments",
         (req) => paymentService.listMyPayments(req.auth)));
+    router.post("/deposits", handle(201, "Deposit paid",
+        (req) => paymentService.payDeposit(req.auth, req.body, key(req), req.get("authorization"))));
+    router.get("/deposits", handle(200, "Deposits",
+        (req) => paymentService.listDeposits(req.auth, { ...req.query })));
+    router.get("/deposits/:bookingId", handle(200, "Deposit",
+        (req) => paymentService.getDeposit(req.auth, req.params.bookingId)));
+    router.post("/deposits/:bookingId/settle", handle(200, "Deposit settled",
+        (req) => paymentService.settleDeposit(req.auth, req.params.bookingId, req.get("authorization"))));
     router.post("/refunds", handle(201, "Refund requested",
         (req) => paymentService.requestRefund(req.auth, req.body, key(req))));
     router.get("/refunds", handle(200, "Refunds",

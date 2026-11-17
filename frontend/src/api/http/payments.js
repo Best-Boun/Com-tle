@@ -23,6 +23,11 @@ const THAI = {
     "Only a requested refund can be approved": "อนุมัติได้เฉพาะคำขอที่รออนุมัติ",
     "Only an approved refund can be executed": "ดำเนินการได้เฉพาะคำขอที่อนุมัติแล้ว",
     "Not authorized for this payment operation": "คุณไม่มีสิทธิ์ทำรายการนี้",
+    "The time to pay the deposit has run out": "หมดเวลาชำระมัดจำแล้ว กรุณาจองคิวใหม่",
+    "This booking is not waiting for a deposit": "การจองนี้ไม่ได้รอชำระมัดจำแล้ว",
+    "A deposit for this booking was already recorded": "การจองนี้ชำระมัดจำไปแล้ว",
+    "Booking Service is unavailable": "ระบบจองคิวไม่พร้อมใช้งาน",
+    "Booking not found": "ไม่พบการจอง",
     "Authentication required": "กรุณาเข้าสู่ระบบ"
 };
 
@@ -305,6 +310,44 @@ export const payments = {
         return refreshedWorkOrder(woId);
     },
 
+    // ---- booking deposits ---------------------------------------------------------
+
+    /** Customer pays a held booking's deposit (mock provider). */
+    payDeposit(bookingId, { method }) {
+        return request("/payments/deposits", {
+            method: "POST",
+            idempotent: true,
+            body: { booking_id: bookingId, payment_method: method }
+        });
+    },
+
+    /** The deposit of one booking, or null when none was paid. */
+    async depositFor(bookingId) {
+        try {
+            return await request(`/payments/deposits/${encodeURIComponent(bookingId)}`);
+        } catch (error) {
+            if (error.status === 404) return null;
+            throw error;
+        }
+    },
+
+    async listDeposits({ status } = {}) {
+        return (await request(`/payments/deposits${query({ status })}`)).items;
+    },
+
+    /**
+     * Refund, keep or apply a paid deposit to match its booking (cancelled,
+     * no-show, checked in). Safe to call again; null when there is no deposit.
+     */
+    async settleDeposit(bookingId) {
+        try {
+            return await request(`/payments/deposits/${encodeURIComponent(bookingId)}/settle`, { method: "POST" });
+        } catch (error) {
+            if (error.status === 404) return null;
+            throw error;
+        }
+    },
+
     // ---- two-person refunds (for the refund approval UI) ----------------------
 
     requestRefund(paymentId, { amount, reason }) {
@@ -408,10 +451,46 @@ async function loadPaymentDetails(wo) {
         const data = await request("/payments/my");
         balance = data.items.find((entry) => entry.work_order_id === wo.work_order_id) || null;
     }
+    const deposit = await bookingDeposit(wo);
     const payment = summaryForWorkOrder(wo, balance);
+    // Before a bill exists the applied deposit is not in any balance yet.
+    if (!balance && deposit?.status === "APPLIED") {
+        payment.paid += deposit.amount;
+        payment.net_paid += deposit.amount;
+        payment.balance = Math.max(0, payment.due - payment.net_paid);
+    }
+    const transactions = await payments.transactionsFor(wo.work_order_id);
     return {
         payment,
-        payments: await payments.transactionsFor(wo.work_order_id)
+        payments: deposit?.status === "APPLIED" ? [depositTransaction(deposit), ...transactions] : transactions
+    };
+}
+
+/**
+ * The deposit paid with the booking this work order came from. A deposit still
+ * held after check-in (the settle call was missed) is applied here.
+ */
+async function bookingDeposit(wo) {
+    if (!wo.booking_id) return null;
+    try {
+        let deposit = await payments.depositFor(wo.booking_id);
+        if (deposit?.status === "PAID") deposit = (await payments.settleDeposit(wo.booking_id)) || deposit;
+        return deposit;
+    } catch {
+        return null;
+    }
+}
+
+function depositTransaction(deposit) {
+    return {
+        payment_id: deposit.deposit_id,
+        work_order_id: deposit.work_order_id,
+        type: "PAYMENT",
+        amount: deposit.amount,
+        method: "DEPOSIT",
+        recorded_by: deposit.customer_user_id,
+        note: deposit.reference_number,
+        created_at: deposit.paid_at
     };
 }
 

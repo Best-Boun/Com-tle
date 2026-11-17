@@ -51,6 +51,13 @@ function loadBookingConfig(env = process.env) {
         maxDaysAhead: positiveInteger(env, "BOOKING_MAX_DAYS_AHEAD", 30),
         catalogServiceUrl: serviceUrl(env, "CATALOG_SERVICE_URL"),
         repairServiceUrl: serviceUrl(env, "REPAIR_SERVICE_URL"),
+        // Payment-Service, asked whether a booking's deposit was paid.
+        paymentServiceUrl: serviceUrl(
+            { PAYMENT_SERVICE_URL: env.PAYMENT_SERVICE_URL || "http://localhost:3006" },
+            "PAYMENT_SERVICE_URL"
+        ),
+        // How long a slot is held while the customer pays the deposit.
+        depositHoldMinutes: positiveInteger(env, "BOOKING_DEPOSIT_HOLD_MINUTES", 10),
         serviceCallTimeoutMs: positiveInteger(env, "SERVICE_CALL_TIMEOUT_MS", 5000)
     };
 }
