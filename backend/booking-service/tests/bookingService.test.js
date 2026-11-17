@@ -21,6 +21,7 @@ function makeService(repo, clients, now = FIXED_NOW, extra = {}) {
         bookingRepository: repo,
         catalogClient: clients.catalogClient,
         repairClient: clients.repairClient,
+        paymentClient: clients.paymentClient,
         config: TEST_CONFIG,
         now: () => now
     });
@@ -30,6 +31,15 @@ function setup(now = FIXED_NOW) {
     const repo = createFakeBookingRepository();
     const clients = createFakeClients();
     return { repo, clients, service: makeService(repo, clients, now) };
+}
+
+/** Book and pay the deposit, like the customer does: the booking ends CONFIRMED. */
+async function confirmed(service, clients, input, user = CUSTOMER) {
+    const held = await service.createBooking(input, user, CTX);
+    clients.state.deposits.set(held.booking_id, {
+        booking_id: held.booking_id, deposit_id: `dep-${held.booking_id}`, status: "PAID", reference_number: "MOCK-1"
+    });
+    return service.confirmDeposit(held.booking_id, user, CTX);
 }
 
 function bookingInput(overrides = {}) {
@@ -51,11 +61,12 @@ test("time helpers convert Bangkok wall-clock time to UTC and back", () => {
     assert.deepEqual(utcToZoned(utc, "Asia/Bangkok"), { date: "2026-11-12", time: "10:00" });
 });
 
-test("createBooking stores UTC scheduled_at, team columns, and is confirmed straight away", async () => {
+test("createBooking stores UTC scheduled_at, team columns, and holds the slot for the deposit", async () => {
     const { service, repo, clients } = setup();
     const booking = await service.createBooking(bookingInput(), CUSTOMER, CTX);
 
-    assert.equal(booking.status, "CONFIRMED");
+    assert.equal(booking.status, "AWAITING_DEPOSIT");
+    assert.equal(new Date(booking.deposit_due_at).toISOString(), "2026-11-11T03:10:00.000Z");
     assert.equal(booking.technician_id, null);
     assert.equal(booking.customer_id, CUSTOMER.userId);
     assert.equal(booking.scheduled_at, "2026-11-12T03:00:00.000Z");
@@ -70,7 +81,7 @@ test("createBooking stores UTC scheduled_at, team columns, and is confirmed stra
     assert.equal(booking.service_currency, "THB");
     assert.equal(clients.calls.catalog[0].ctx.authorization, "Bearer token");
     assert.equal(repo.history.length, 1);
-    assert.equal(repo.history[0].new_status, "CONFIRMED");
+    assert.equal(repo.history[0].new_status, "AWAITING_DEPOSIT");
     assert.equal(repo.history[0].old_status, null);
 });
 
@@ -81,7 +92,7 @@ test("createBooking rejects non-slot times, past slots and far-future dates", as
     await assert.rejects(service.createBooking(bookingInput({ appointment_date: "2026-11-10" }), CUSTOMER, CTX), { statusCode: 400 });
     await assert.rejects(service.createBooking(bookingInput({ appointment_date: "2026-12-12" }), CUSTOMER, CTX), { statusCode: 400 });
     const ok = await service.createBooking(bookingInput({ appointment_date: "2026-11-11", appointment_time: "11:00" }), CUSTOMER, CTX);
-    assert.equal(ok.status, "CONFIRMED");
+    assert.equal(ok.status, "AWAITING_DEPOSIT");
 });
 
 test("createBooking rejects invalid dates and fields the client must not set", async () => {
@@ -108,7 +119,7 @@ test("slot capacity is enforced and cancelled bookings free the slot", async () 
 
     await service.cancelBooking(first.booking_id, {}, CUSTOMER);
     const again = await service.createBooking(bookingInput(), CUSTOMER, CTX);
-    assert.equal(again.status, "CONFIRMED");
+    assert.equal(again.status, "AWAITING_DEPOSIT");
 });
 
 test("availability reports remaining capacity and closes past slots", async () => {
@@ -146,9 +157,12 @@ test("listMyBookings only returns the caller's bookings and filters by local dat
     assert.equal(day.items[0].appointment_date, "2026-11-13");
 });
 
-test("check-in of a new (already confirmed) booking creates exactly one work order", async () => {
+test("check-in of a paid booking creates exactly one work order", async () => {
     const { service, clients, repo } = setup();
-    const booking = await service.createBooking(bookingInput(), CUSTOMER, CTX);
+    const held = await service.createBooking(bookingInput(), CUSTOMER, CTX);
+    await assert.rejects(service.checkIn(held.booking_id, ADMIN, CTX), { statusCode: 409 });
+    clients.state.deposits.set(held.booking_id, { booking_id: held.booking_id, deposit_id: "d1", status: "PAID" });
+    const booking = await service.confirmDeposit(held.booking_id, CUSTOMER, CTX);
 
     // Already confirmed: confirming again is not a valid transition.
     await assert.rejects(service.confirmBooking(booking.booking_id, ADMIN), { statusCode: 409 });
@@ -162,14 +176,14 @@ test("check-in of a new (already confirmed) booking creates exactly one work ord
 
     await assert.rejects(service.checkIn(booking.booking_id, ADMIN, CTX), { statusCode: 409 });
     assert.equal(clients.calls.repair.length, 1);
-    assert.deepEqual(repo.history.map((h) => h.new_status), ["CONFIRMED", "COMPLETED"]);
+    assert.deepEqual(repo.history.map((h) => h.new_status), ["AWAITING_DEPOSIT", "CONFIRMED", "COMPLETED"]);
     assert.equal(clients.calls.repair[0].payload.technician_user_id, undefined);
     assert.ok(repo.history.every((h) => h.changed_by));
 });
 
 test("check-in keeps the booking CONFIRMED when Repair fails; retry reuses the key", async () => {
     const { service, clients } = setup();
-    const booking = await service.createBooking(bookingInput(), CUSTOMER, CTX);
+    const booking = await confirmed(service, clients, bookingInput());
 
     clients.state.repairFails = true;
     await assert.rejects(service.checkIn(booking.booking_id, ADMIN, CTX), { statusCode: 503 });
@@ -227,7 +241,7 @@ const OTHER_TECH = { userId: "bbbbbbbb-0000-4000-8000-000000000002", roles: ["TE
 
 test("no-show: only after the appointment time, final, and counted per customer for the shop", async () => {
     const { service, repo, clients } = setup();
-    const booking = await service.createBooking(bookingInput({ appointment_date: "2026-11-11", appointment_time: "11:00" }), CUSTOMER, CTX);
+    const booking = await confirmed(service, clients, bookingInput({ appointment_date: "2026-11-11", appointment_time: "11:00" }));
 
     await assert.rejects(service.markNoShow(booking.booking_id, {}, ADMIN), { statusCode: 409 });
 
@@ -248,11 +262,12 @@ test("no-show: only after the appointment time, final, and counted per customer 
 });
 
 test("queue lists open bookings from today for the next days, earliest first", async () => {
-    const { service } = setup();
-    const later = await service.createBooking(bookingInput({ appointment_date: "2026-11-12", appointment_time: "13:00" }), CUSTOMER, CTX);
-    const today = await service.createBooking(bookingInput({ appointment_date: "2026-11-11", appointment_time: "11:00" }), CUSTOMER, CTX);
-    await service.createBooking(bookingInput({ appointment_date: "2026-11-14" }), CUSTOMER, CTX);
-    const cancelled = await service.createBooking(bookingInput({ appointment_date: "2026-11-12", appointment_time: "09:00" }), OTHER_CUSTOMER, CTX);
+    const { service, clients } = setup();
+    const later = await confirmed(service, clients, bookingInput({ appointment_date: "2026-11-12", appointment_time: "13:00" }));
+    const today = await confirmed(service, clients, bookingInput({ appointment_date: "2026-11-11", appointment_time: "11:00" }));
+    await confirmed(service, clients, bookingInput({ appointment_date: "2026-11-14" }));
+    await service.createBooking(bookingInput({ appointment_date: "2026-11-12", appointment_time: "11:00" }), CUSTOMER, CTX); // unpaid hold
+    const cancelled = await confirmed(service, clients, bookingInput({ appointment_date: "2026-11-12", appointment_time: "09:00" }), OTHER_CUSTOMER);
     await service.cancelBooking(cancelled.booking_id, {}, OTHER_CUSTOMER);
 
     const queue = await service.listQueue({});
@@ -263,7 +278,7 @@ test("queue lists open bookings from today for the next days, earliest first", a
 
 test("a technician takes a booking first-come, can give it back, and check-in hands the job over", async () => {
     const { service, clients } = setup();
-    const booking = await service.createBooking(bookingInput(), CUSTOMER, CTX);
+    const booking = await confirmed(service, clients, bookingInput());
 
     const taken = await service.claimBooking(booking.booking_id, TECH);
     assert.equal(taken.technician_id, TECH.userId);
@@ -281,4 +296,54 @@ test("a technician takes a booking first-come, can give it back, and check-in ha
     assert.equal(clients.calls.repair[0].payload.technician_user_id, TECH.userId);
     await assert.rejects(service.claimBooking(booking.booking_id, OTHER_TECH), { statusCode: 409 });
     await assert.rejects(service.claimBooking("not-a-uuid", TECH), { statusCode: 404 });
+});
+
+test("deposit: confirm needs a paid deposit, is idempotent, and only the owner can confirm", async () => {
+    const { service, clients, repo } = setup();
+    const held = await service.createBooking(bookingInput(), CUSTOMER, CTX);
+
+    await assert.rejects(service.confirmDeposit(held.booking_id, CUSTOMER, CTX), { statusCode: 409 });
+    clients.state.deposits.set(held.booking_id, { booking_id: held.booking_id, deposit_id: "d1", status: "REFUNDED" });
+    await assert.rejects(service.confirmDeposit(held.booking_id, CUSTOMER, CTX), { statusCode: 409 });
+    clients.state.deposits.set(held.booking_id, { booking_id: held.booking_id, deposit_id: "d1", status: "PAID", reference_number: "MOCK-ABC" });
+    await assert.rejects(service.confirmDeposit(held.booking_id, OTHER_CUSTOMER, CTX), { statusCode: 404 });
+
+    const booking = await service.confirmDeposit(held.booking_id, CUSTOMER, CTX);
+    assert.equal(booking.status, "CONFIRMED");
+    assert.match(repo.history.at(-1).reason, /MOCK-ABC/);
+    assert.equal(clients.calls.payment[0].ctx.authorization, "Bearer token");
+    assert.equal((await service.confirmDeposit(held.booking_id, CUSTOMER, CTX)).status, "CONFIRMED");
+});
+
+test("deposit: an unpaid hold expires, frees the slot and shows as cancelled", async () => {
+    const { service, repo, clients } = setup();
+    const held = await service.createBooking(bookingInput(), CUSTOMER, CTX);
+    await service.createBooking(bookingInput(), OTHER_CUSTOMER, CTX);
+    await assert.rejects(service.createBooking(bookingInput(), CUSTOMER, CTX), { statusCode: 409 });
+
+    const later = makeService(repo, clients, new Date("2026-11-11T03:11:00Z")); // 1 minute after the hold ran out
+    const third = await later.createBooking(bookingInput(), CUSTOMER, CTX);
+    assert.equal(third.status, "AWAITING_DEPOSIT");
+
+    const mine = await later.listMyBookings({}, CUSTOMER);
+    const expired = mine.items.find((b) => b.booking_id === held.booking_id);
+    assert.equal(expired.status, "CANCELLED");
+    assert.equal(expired.cancellation_reason, "Deposit not paid in time");
+    assert.equal(expired.cancelled_by, null);
+});
+
+test("deposit: paid late is confirmed while the slot has room, refused when it was taken", async () => {
+    const { service, repo, clients } = setup();
+    const roomy = await service.createBooking(bookingInput({ appointment_time: "11:00" }), CUSTOMER, CTX);
+    const crowded = await service.createBooking(bookingInput(), CUSTOMER, CTX);
+    const late = makeService(repo, clients, new Date("2026-11-11T03:15:00Z"));
+    await late.createBooking(bookingInput(), OTHER_CUSTOMER, CTX);
+    await late.createBooking(bookingInput(), OTHER_CUSTOMER, CTX);
+
+    for (const b of [roomy, crowded]) {
+        clients.state.deposits.set(b.booking_id, { booking_id: b.booking_id, deposit_id: `d-${b.booking_id}`, status: "PAID" });
+    }
+    assert.equal((await late.confirmDeposit(roomy.booking_id, CUSTOMER, CTX)).status, "CONFIRMED");
+    await assert.rejects(late.confirmDeposit(crowded.booking_id, CUSTOMER, CTX), { statusCode: 409 });
+    assert.equal((await late.getBooking(crowded.booking_id, CUSTOMER)).status, "CANCELLED");
 });

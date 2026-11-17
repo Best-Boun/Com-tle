@@ -7,7 +7,8 @@ const { createBookingRepository } = require("./src/repositories/bookingRepositor
 const { createBookingService } = require("./src/services/bookingService");
 const {
     createCatalogClient,
-    createRepairClient
+    createRepairClient,
+    createPaymentClient
 } = require("./src/clients/serviceClients");
 const {
     loadServiceJwtConfig,
@@ -27,6 +28,10 @@ const app = createApp({
         }),
         repairClient: createRepairClient({
             baseUrl: config.repairServiceUrl,
+            timeoutMs: config.serviceCallTimeoutMs
+        }),
+        paymentClient: createPaymentClient({
+            baseUrl: config.paymentServiceUrl,
             timeoutMs: config.serviceCallTimeoutMs
         }),
         config

@@ -19,6 +19,7 @@ const BOOKING_COLUMNS = [
     "work_order_id",
     "technician_id",
     "technician_claimed_at",
+    "deposit_due_at",
     "cancelled_at",
     "cancelled_by",
     "cancellation_reason",
@@ -27,6 +28,14 @@ const BOOKING_COLUMNS = [
 ];
 
 const SLOT_LOCK_TIMEOUT_SECONDS = 10;
+
+/** A booking occupies its slot when it is active, or is a hold still being paid. */
+function occupying(where, now) {
+    where.whereIn("status", SLOT_OCCUPYING_STATUSES)
+        .orWhere((hold) => hold
+            .where("status", BOOKING_STATUS.AWAITING_DEPOSIT)
+            .where("deposit_due_at", ">", now));
+}
 
 function toBooking(row) {
     if (!row) return null;
@@ -102,22 +111,35 @@ function createBookingRepository(db) {
             }
         },
 
-        async countActiveAt(trx, scheduledAt) {
-            const [{ total }] = await q(trx, "bookings")
+        /** Bookings taking a place at `scheduledAt`, including holds still being paid. */
+        async countActiveAt(trx, scheduledAt, now = new Date(), exceptBookingId = null) {
+            const query = q(trx, "bookings")
                 .where("scheduled_at", scheduledAt)
-                .whereIn("status", SLOT_OCCUPYING_STATUSES)
-                .count({ total: "*" });
+                .where((w) => occupying(w, now));
+            if (exceptBookingId) query.whereNot("booking_id", exceptBookingId);
+            const [{ total }] = await query.count({ total: "*" });
             return Number(total);
         },
 
         /** Active bookings between [from, to), returned as their scheduled_at values. */
-        async listActiveTimes(from, to) {
+        async listActiveTimes(from, to, now = new Date()) {
             const rows = await q(null, "bookings")
                 .select("scheduled_at")
                 .where("scheduled_at", ">=", from)
                 .where("scheduled_at", "<", to)
-                .whereIn("status", SLOT_OCCUPYING_STATUSES);
+                .where((w) => occupying(w, now));
             return rows.map((r) => new Date(r.scheduled_at));
+        },
+
+        /** Holds whose time to pay the deposit has run out (still AWAITING_DEPOSIT). */
+        async listExpiredHolds(now, { customerId, bookingId } = {}) {
+            const query = q(null, "bookings")
+                .select(BOOKING_COLUMNS)
+                .where({ status: BOOKING_STATUS.AWAITING_DEPOSIT })
+                .where("deposit_due_at", "<=", now);
+            if (customerId) query.where({ customer_id: customerId });
+            if (bookingId) query.where({ booking_id: bookingId });
+            return (await query).map(toBooking);
         },
 
         async insertBooking(trx, booking) {

@@ -12,7 +12,7 @@ export default function MyBookings() {
     const list = useAsync(() => api.bookings.listMine(), []);
 
     const items = (list.data || []).filter((b) =>
-        tab === "upcoming" ? ["PENDING", "CONFIRMED"].includes(b.status) : ["COMPLETED", "CANCELLED", "NO_SHOW"].includes(b.status)
+        tab === "upcoming" ? ["AWAITING_DEPOSIT", "PENDING", "CONFIRMED"].includes(b.status) : ["COMPLETED", "CANCELLED", "NO_SHOW"].includes(b.status)
     );
     if (tab === "upcoming") items.sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
 

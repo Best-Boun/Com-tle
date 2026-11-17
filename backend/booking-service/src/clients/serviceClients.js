@@ -98,7 +98,36 @@ function createRepairClient({ baseUrl, timeoutMs = 5000, fetchImpl = fetch }) {
     };
 }
 
+function createPaymentClient({ baseUrl, timeoutMs = 5000, fetchImpl = fetch }) {
+    return {
+        /**
+         * The deposit Payment-Service holds for a booking, read with the
+         * caller's own token (Payment-Service checks who may see it).
+         * Returns null when no deposit was paid.
+         */
+        async getDeposit(bookingId, { authorization }) {
+            const result = await callJson(
+                fetchImpl,
+                `${baseUrl}/deposits/${encodeURIComponent(bookingId)}`,
+                {
+                    method: "GET",
+                    headers: { authorization, accept: "application/json" },
+                    timeoutMs
+                }
+            );
+            if (result.ok && result.body?.data?.booking_id === bookingId) {
+                return result.body.data;
+            }
+            if (result.status === 404) {
+                return null;
+            }
+            throw new AppError("Payment Service is unavailable, please try again", 503);
+        }
+    };
+}
+
 module.exports = {
     createCatalogClient,
-    createRepairClient
+    createRepairClient,
+    createPaymentClient
 };

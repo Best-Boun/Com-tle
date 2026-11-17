@@ -8,6 +8,7 @@ export const DICT = {
         "role.TECHNICIAN": "ช่างซ่อม",
         "role.ADMIN": "ผู้ดูแลร้าน",
 
+        "status.booking.AWAITING_DEPOSIT": "รอชำระมัดจำ",
         "status.booking.PENDING": "รอร้านยืนยัน",
         "status.booking.CONFIRMED": "ยืนยันแล้ว",
         "status.booking.COMPLETED": "รับเครื่องแล้ว",
@@ -47,6 +48,11 @@ export const DICT = {
         "pay.method.TRANSFER": "โอนเงิน",
         "pay.method.CARD": "บัตร",
         "pay.method.PROMPTPAY": "พร้อมเพย์",
+        "pay.method.DEPOSIT": "มัดจำจากการจอง",
+        "deposit.status.PAID": "ชำระแล้ว (ร้านถือไว้)",
+        "deposit.status.APPLIED": "หักจากค่าซ่อมแล้ว",
+        "deposit.status.REFUNDED": "คืนให้ลูกค้าแล้ว",
+        "deposit.status.FORFEITED": "ร้านยึด (ไม่มาตามนัด)",
         "pay.type.PAYMENT": "รับชำระ",
         "pay.type.REFUND": "คืนเงิน",
 
@@ -76,6 +82,7 @@ export const DICT = {
         "role.TECHNICIAN": "Technician",
         "role.ADMIN": "Shop admin",
 
+        "status.booking.AWAITING_DEPOSIT": "Deposit due",
         "status.booking.PENDING": "Waiting for shop",
         "status.booking.CONFIRMED": "Confirmed",
         "status.booking.COMPLETED": "Device received",
@@ -115,6 +122,11 @@ export const DICT = {
         "pay.method.TRANSFER": "Bank transfer",
         "pay.method.CARD": "Card",
         "pay.method.PROMPTPAY": "PromptPay",
+        "pay.method.DEPOSIT": "Booking deposit",
+        "deposit.status.PAID": "paid (held by the shop)",
+        "deposit.status.APPLIED": "taken off the repair bill",
+        "deposit.status.REFUNDED": "refunded",
+        "deposit.status.FORFEITED": "kept by the shop (no-show)",
         "pay.type.PAYMENT": "Payment",
         "pay.type.REFUND": "Refund",
 
@@ -143,7 +155,7 @@ export const DICT = {
 
 /** Badge colour per status: amber = waiting on someone, blue = in progress, green = done. */
 export const TONES = {
-    booking: { PENDING: "amber", CONFIRMED: "blue", COMPLETED: "green", CANCELLED: "grey", NO_SHOW: "red" },
+    booking: { AWAITING_DEPOSIT: "amber", PENDING: "amber", CONFIRMED: "blue", COMPLETED: "green", CANCELLED: "grey", NO_SHOW: "red" },
     wo: { PENDING: "grey", DIAGNOSING: "blue", WAITING_APPROVAL: "amber", APPROVED: "blue", REPAIRING: "blue", TESTING: "blue", COMPLETED: "green", CANCELLED: "grey", HANDED_OVER: "green" },
     quote: { DRAFT: "grey", SENT: "amber", APPROVED: "green", REJECTED: "red" },
     pay: { UNPAID: "red", PARTIAL: "amber", PAID: "green", PARTIALLY_REFUNDED: "blue", REFUNDED: "grey" },
