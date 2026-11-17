@@ -60,16 +60,18 @@ test("security runtime validates configuration and composes only security depend
         fetchImplementation: async (url, options) => {
             networkCalls += 1;
             requests.push({ url, options });
+            const { user_id: userId } = JSON.parse(options.body);
             return {
                 status: 200,
                 ok: true,
                 async json() {
                     return {
                         success: true,
+                        message: "Customer identity resolved",
                         data: {
-                            user_id: "user-1",
-                            permission: "payment.record",
-                            allowed: true
+                            user_id: userId,
+                            customer_id: `customer-of-${userId}`,
+                            customer_type: "REGISTERED"
                         }
                     };
                 }
@@ -90,38 +92,36 @@ test("security runtime validates configuration and composes only security depend
     assert.equal(networkCalls, 0);
     assert.equal(databaseCalls, 0);
 
-    const userToken = jwt.sign(
-        { token_use: "user_access" },
+    const userToken = (subject, roles) => jwt.sign(
+        { token_use: "user_access", roles },
         fixture.userKeys.privateKey,
         {
             algorithm: "RS256",
             issuer: "user-service",
             audience: "com-tle-api",
-            subject: "user-1",
+            subject,
             expiresIn: 60
         }
     );
-    const authContext = runtime.userAuthorizationAdapter.authenticateToken(userToken);
-    assert.equal(
-        await runtime.userAuthorizationAdapter.requestPermission(
-            authContext,
-            "payment.record"
-        ),
-        true
-    );
-    assert.equal(
-        await runtime.userAuthorizationAdapter.requestPermission(
-            authContext,
-            "payment.record"
-        ),
-        true
-    );
+    const adapter = runtime.userAuthorizationAdapter;
+    // Authorization is decided from the token's roles: no User-Service call.
+    const admin = adapter.authenticateToken(userToken("user-1", ["ADMIN"]));
+    assert.equal(await adapter.requestPermission(admin, "payment.record"), true);
+    assert.equal(await adapter.requestPermission(
+        adapter.authenticateToken(userToken("user-2", ["CUSTOMER"])), "payment.record"), false);
+    assert.equal(networkCalls, 0);
+
+    // Customer identity still comes from User-Service, with a fresh internal token each time.
+    assert.equal(await adapter.requestCustomerId(
+        adapter.authenticateToken(userToken("user-3", ["CUSTOMER"]))), "customer-of-user-3");
+    assert.equal(await adapter.requestCustomerId(
+        adapter.authenticateToken(userToken("user-4", ["CUSTOMER"]))), "customer-of-user-4");
 
     assert.equal(networkCalls, 2);
     assert.equal(databaseCalls, 0);
     assert.deepEqual(requests.map(({ url }) => url), [
-        "https://users.internal/internal/permissions/check",
-        "https://users.internal/internal/permissions/check"
+        "https://users.internal/internal/customers/resolve",
+        "https://users.internal/internal/customers/resolve"
     ]);
     const internalTokens = requests.map(({ options }) =>
         options.headers.authorization.slice("Bearer ".length)

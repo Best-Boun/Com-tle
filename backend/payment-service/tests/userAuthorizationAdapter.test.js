@@ -98,10 +98,11 @@ function createAdapter(options = {}) {
     });
 }
 
-test("User JWT accepts a trusted RS256 user token without using role or permission claims", () => {
-    const verified = createVerifier().verify(createUserToken());
-    assert.deepEqual(verified, { userId: "user-verified" });
-    assert.equal(Object.hasOwn(verified, "roles"), false);
+test("User JWT returns the verified subject and only known roles; never permission claims", () => {
+    const verified = createVerifier().verify(createUserToken({ roles: ["ADMIN", "ROOT", "ADMIN"] }));
+    assert.deepEqual(verified, { userId: "user-verified", roles: ["ADMIN"] });
+    assert.equal(Object.hasOwn(verified, "permissions"), false);
+    assert.deepEqual(createVerifier().verify(createUserToken({ roles: "ADMIN" })).roles, []);
 });
 
 test("User JWT rejects invalid signature, issuer, audience, expiry, subject, purpose, and key ID", () => {
@@ -192,151 +193,50 @@ test("internal service issuer creates short-lived RS256 tokens with kid, jti, au
     assert.equal(decoded.payload.exp - decoded.payload.iat, 30);
 });
 
-test("authorization adapter derives actor identity from verified token and sends a fresh internal token", async () => {
-    let request;
+test("permissions come from the verified token's roles, without calling User-Service", async () => {
+    let calls = 0;
     const adapter = createAdapter({
-        fetchImplementation: async (url, options) => {
-            request = { url, options };
-            return permissionResponse("user-verified", "payment.record");
-        }
-    });
-    const authContext = adapter.authenticateToken(createUserToken());
-    const actorUserId = await adapter.authorizePaymentRecorder(authContext);
-
-    assert.equal(actorUserId, "user-verified");
-    assert.equal(request.url, "https://user-service.internal/internal/permissions/check");
-    assert.equal(request.options.headers.authorization, "Bearer signed-internal-token");
-    assert.deepEqual(JSON.parse(request.options.body), {
-        user_id: "user-verified",
-        permission: "payment.record",
-        resource: {}
-    });
-    assert.equal(Object.hasOwn(authContext, "roles"), false);
-    assert.equal(Object.hasOwn(authContext, "permissions"), false);
-});
-
-test("adapter distinguishes permission denial, User JWT failure, and internal authentication failure", async () => {
-    const denied = createAdapter({
-        fetchImplementation: async () =>
-            permissionResponse("user-verified", "payment.record", false)
-    });
-    const authContext = denied.authenticateToken(createUserToken());
-    await assert.rejects(
-        denied.authorizePaymentRecorder(authContext),
-        (error) => error.statusCode === 403
-    );
-    await assert.rejects(
-        denied.authorizePaymentRecorder({ userId: "client-supplied-user" }),
-        (error) => error.statusCode === 401
-    );
-    assert.throws(
-        () => denied.authenticateToken("not-a-token"),
-        (error) => error.statusCode === 401
-    );
-
-    const internalAuthFailure = createAdapter({
-        fetchImplementation: async () => ({
-            status: 401,
-            ok: false,
-            async json() {
-                return {};
-            }
-        })
-    });
-    await assert.rejects(
-        internalAuthFailure.authorizePaymentRecorder(
-            internalAuthFailure.authenticateToken(createUserToken())
-        ),
-        (error) => error.statusCode === 401
-    );
-});
-
-test("adapter fails closed on timeout, network failure, malformed response, and unapproved permission", async () => {
-    const networkFailure = createAdapter({
         fetchImplementation: async () => {
-            throw new Error("timeout");
+            calls += 1;
+            throw new Error("User-Service is down");
         }
     });
-    await assert.rejects(
-        networkFailure.requestPermission(
-            networkFailure.authenticateToken(createUserToken()),
-            "payment.record"
-        ),
-        (error) => error.statusCode === 503
-    );
+    const admin = adapter.authenticateToken(createUserToken({ roles: ["ADMIN"] }));
+    const customer = adapter.authenticateToken(createUserToken({ roles: ["CUSTOMER"] }));
+    const technician = adapter.authenticateToken(createUserToken({ roles: ["TECHNICIAN"] }));
 
-    const timedOut = createAdapter({
-        timeoutMs: 5,
-        fetchImplementation: async (_url, { signal }) => new Promise((resolve, reject) => {
-            signal.addEventListener("abort", () => reject(new Error("aborted")), {
-                once: true
-            });
-        })
-    });
-    await assert.rejects(
-        timedOut.requestPermission(
-            timedOut.authenticateToken(createUserToken()),
-            "payment.record"
-        ),
-        (error) => error.statusCode === 503
-    );
+    assert.equal(await adapter.authorizePaymentRecorder(admin), "user-verified");
+    assert.equal(await adapter.authorizeRefundActor(admin, "payment.refund"), "user-verified");
+    for (const permission of ["payment.record", "payment.view_all", "payment.refund"]) {
+        assert.equal(await adapter.requestPermission(admin, permission), true);
+        assert.equal(await adapter.requestPermission(customer, permission), false);
+        assert.equal(await adapter.requestPermission(technician, permission), false);
+    }
+    assert.equal(await adapter.requestPermission(customer, "payment.view_own"), true);
+    assert.equal(await adapter.requestPermission(customer, "payment.view_own", { work_order_id: "wo-1" }), true);
+    assert.equal(await adapter.requestPermission(admin, "payment.view_own"), false);
+    assert.equal(calls, 0, "no User-Service call for authorization");
+    assert.equal(Object.hasOwn(admin, "roles"), false);
+    assert.equal(Object.hasOwn(admin, "permissions"), false);
+});
 
-    const unavailable = createAdapter({
-        fetchImplementation: async () => ({
-            status: 503,
-            ok: false
-        })
-    });
+test("adapter denies unknown roles and permissions, forged contexts and bad resources", async () => {
+    const adapter = createAdapter({ fetchImplementation: async () => { throw new Error("unused"); } });
+    const unknownRole = adapter.authenticateToken(createUserToken({ roles: ["SUPERUSER"] }));
+    await assert.rejects(adapter.authorizePaymentRecorder(unknownRole), (error) => error.statusCode === 403);
     await assert.rejects(
-        unavailable.requestPermission(
-            unavailable.authenticateToken(createUserToken()),
-            "payment.record"
-        ),
-        (error) => error.statusCode === 503
-    );
-
-    const badResponse = createAdapter({
-        fetchImplementation: async () => ({
-            status: 200,
-            ok: true,
-            async json() {
-                return {
-                    success: true,
-                    data: {
-                        user_id: "attacker-user",
-                        permission: "payment.record",
-                        allowed: true
-                    }
-                };
-            }
-        })
-    });
-    await assert.rejects(
-        badResponse.requestPermission(
-            badResponse.authenticateToken(createUserToken()),
-            "payment.record"
-        ),
-        (error) => error.statusCode === 503
-    );
-    assert.equal(
-        await badResponse.requestPermission(
-            badResponse.authenticateToken(createUserToken()),
-            "not-approved"
-        ),
-        false
-    );
-
-    const refundDenied = createAdapter({
-        fetchImplementation: async () =>
-            permissionResponse("user-verified", "payment.refund", false)
-    });
-    await assert.rejects(
-        refundDenied.authorizeRefundActor(
-            refundDenied.authenticateToken(createUserToken()),
-            "payment.refund"
-        ),
+        adapter.authorizeRefundActor(adapter.authenticateToken(createUserToken({ roles: ["CUSTOMER"] })), "payment.refund"),
         (error) => error.statusCode === 403
     );
+    const admin = adapter.authenticateToken(createUserToken());
+    assert.equal(await adapter.requestPermission(admin, "not-approved"), false);
+    await assert.rejects(adapter.requestPermission(admin, "payment.record", { anything: "x" }), (error) => error.statusCode === 400);
+    // A context the adapter did not create (e.g. built from request data) is rejected.
+    await assert.rejects(
+        adapter.authorizePaymentRecorder({ userId: "client-supplied-user" }),
+        (error) => error.statusCode === 401
+    );
+    assert.throws(() => adapter.authenticateToken("not-a-token"), (error) => error.statusCode === 401);
 });
 
 test("customer resolution sends the verified subject and original User JWT separately", async () => {
@@ -427,7 +327,7 @@ test("identity lookup returns null on User-Service 401, 403, and 404 and fails c
 });
 
 test("timeout covers response-body parsing and does not retry", async () => {
-    for (const call of ["identity", "permission"]) {
+    for (const call of ["identity"]) {
         let requests = 0;
         const adapter = createAdapter({
             timeoutMs: 10,
@@ -459,8 +359,9 @@ test("timeout covers response-body parsing and does not retry", async () => {
     }
 });
 
-test("each identity request issues a new Internal Service JWT", async () => {
+test("a resolved customer id is remembered, so it keeps working while User-Service is down", async () => {
     const internalTokens = [];
+    let up = true;
     const adapter = createAdapter({
         internalServiceTokenIssuer: {
             async createToken() {
@@ -469,10 +370,30 @@ test("each identity request issues a new Internal Service JWT", async () => {
                 return token;
             }
         },
-        fetchImplementation: async () => customerIdentityResponse("user-verified", "customer-verified")
+        fetchImplementation: async () => {
+            if (!up) throw new Error("User-Service is down");
+            return customerIdentityResponse("user-verified", "customer-verified");
+        }
     });
-    const authContext = adapter.authenticateToken(createUserToken());
-    await adapter.requestCustomerId(authContext);
-    await adapter.requestCustomerId(authContext);
-    assert.deepEqual(internalTokens, ["internal-1", "internal-2"]);
+    assert.equal(await adapter.requestCustomerId(adapter.authenticateToken(createUserToken())), "customer-verified");
+    up = false;
+    assert.equal(await adapter.requestCustomerId(adapter.authenticateToken(createUserToken())), "customer-verified");
+    assert.deepEqual(internalTokens, ["internal-1"]);
+});
+
+test("a customer never resolved before still needs User-Service, and null answers are not remembered", async () => {
+    let status = 404;
+    const adapter = createAdapter({
+        fetchImplementation: async () => (status === 200
+            ? customerIdentityResponse("user-verified", "customer-verified")
+            : { status, ok: false, async json() { return { success: false, message: "no" }; } })
+    });
+    assert.equal(await adapter.requestCustomerId(adapter.authenticateToken(createUserToken())), null);
+    status = 503;
+    await assert.rejects(
+        adapter.requestCustomerId(adapter.authenticateToken(createUserToken())),
+        (error) => error.statusCode === 503
+    );
+    status = 200;
+    assert.equal(await adapter.requestCustomerId(adapter.authenticateToken(createUserToken())), "customer-verified");
 });
