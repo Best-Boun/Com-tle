@@ -7,6 +7,20 @@ const supportedPermissionRequests = new Set([
     "payment.refund",
     "payment.view_all"
 ]);
+// Which role holds which payment permission. Mirrors the grants in user_db
+// (user-service/seeds/002_permissions.js): staff money operations are ADMIN
+// only, customers see their own payments. Checked here from the verified
+// token's roles, so payments keep working while User-Service is down.
+// Trade-off: a role change takes effect when the user's access token is
+// renewed (at most JWT_EXPIRES_IN, 15 minutes), like in the other services.
+const PAYMENT_ROLE_PERMISSIONS = Object.freeze({
+    ADMIN: Object.freeze(["payment.record", "payment.view_all", "payment.refund"]),
+    CUSTOMER: Object.freeze(["payment.view_own"]),
+    TECHNICIAN: Object.freeze([])
+});
+// user_id -> customer_id never changes once resolved, so it is remembered:
+// customers who already used payments keep working while User-Service is down.
+const CUSTOMER_ID_CACHE_LIMIT = 10_000;
 const resourceSchema = z.object({
     work_order_id: z.string().trim().min(1).max(36).optional(),
     payment_id: z.string().trim().min(1).max(36).optional(),
@@ -54,16 +68,14 @@ function createUserAuthorizationAdapter({
             "User-Service URL must use HTTPS or localhost HTTP in development"
         );
     }
-    const permissionEndpoint = new URL(
-        "/internal/permissions/check",
-        userServiceBase
-    ).toString();
     const customerIdentityEndpoint = new URL(
         "/internal/customers/resolve",
         userServiceBase
     ).toString();
     const authenticatedContexts = new WeakSet();
     const userTokensByContext = new WeakMap();
+    const rolesByContext = new WeakMap();
+    const customerIdByUser = new Map();
 
     function authenticateToken(token) {
         let verified;
@@ -78,6 +90,8 @@ function createUserAuthorizationAdapter({
         const authContext = Object.freeze({ userId: verified.userId });
         authenticatedContexts.add(authContext);
         userTokensByContext.set(authContext, token);
+        // Kept beside the context, never on it: callers cannot supply roles.
+        rolesByContext.set(authContext, Array.isArray(verified.roles) ? verified.roles : []);
         return authContext;
     }
 
@@ -104,62 +118,13 @@ function createUserAuthorizationAdapter({
         if (!supportedPermissionRequests.has(permission)) {
             return false;
         }
-        const parsedResource = resourceSchema.safeParse(resource);
-        if (!parsedResource.success) {
+        if (!resourceSchema.safeParse(resource).success) {
             throw new AppError("Invalid authorization resource", 400);
         }
-
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), timeoutMs);
-        let response;
-        let body;
-        try {
-            const serviceToken = await internalServiceTokenIssuer.createToken();
-            response = await fetchImplementation(permissionEndpoint, {
-                method: "POST",
-                headers: {
-                    authorization: `Bearer ${serviceToken}`,
-                    "content-type": "application/json"
-                },
-                body: JSON.stringify({
-                    user_id: authContext.userId,
-                    permission,
-                    resource: parsedResource.data
-                }),
-                signal: controller.signal,
-                redirect: "error"
-            });
-
-            if (!response
-                || !Number.isInteger(response.status)
-                || typeof response.ok !== "boolean"
-                || typeof response.json !== "function") {
-                throw new AppError("Invalid User-Service authorization response", 503);
-            }
-            if (response.status === 401) {
-                throw new AppError("Internal service authentication failed", 401);
-            }
-            if (!response.ok) {
-                throw new AppError("User-Service authorization unavailable", 503);
-            }
-
-            body = await response.json();
-        } catch (error) {
-            if (error instanceof AppError) {
-                throw error;
-            }
-            throw new AppError("User-Service authorization unavailable", 503);
-        } finally {
-            clearTimeout(timeout);
-        }
-        const decision = body?.success === true ? body.data : null;
-        if (!decision
-            || decision.user_id !== authContext.userId
-            || decision.permission !== permission
-            || typeof decision.allowed !== "boolean") {
-            throw new AppError("Invalid User-Service authorization response", 503);
-        }
-        return decision.allowed;
+        // Ownership of a resource is checked by the payment rules themselves
+        // (customer id / booking owner); this only says whether the role may act.
+        const roles = rolesByContext.get(authContext) || [];
+        return roles.some((role) => PAYMENT_ROLE_PERMISSIONS[role]?.includes(permission));
     }
 
     async function authorizePaymentRecorder(authContext) {
@@ -255,7 +220,17 @@ function createUserAuthorizationAdapter({
         if (!authenticatedContexts.has(authContext)) {
             throw new AppError("Authentication required", 401);
         }
-        return requestCustomerIdentity(authContext.userId, authContext);
+        if (customerIdByUser.has(authContext.userId)) {
+            return customerIdByUser.get(authContext.userId);
+        }
+        const customerId = await requestCustomerIdentity(authContext.userId, authContext);
+        if (customerId) {
+            if (customerIdByUser.size >= CUSTOMER_ID_CACHE_LIMIT) {
+                customerIdByUser.delete(customerIdByUser.keys().next().value);
+            }
+            customerIdByUser.set(authContext.userId, customerId);
+        }
+        return customerId;
     }
 
     return {

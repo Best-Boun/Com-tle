@@ -1,4 +1,7 @@
 const jwt = require("jsonwebtoken");
+const { USER_ROLES } = require("../../../shared/constants");
+
+const KNOWN_ROLES = new Set(Object.values(USER_ROLES));
 
 function createUserJwtVerifier({
     publicKey,
@@ -73,7 +76,12 @@ function createUserJwtVerifier({
                 || verified.sub.trim().length === 0) {
                 throw new Error("Invalid User JWT claims");
             }
-            return Object.freeze({ userId: verified.sub });
+            // Roles are signed by User-Service with the rest of the token, so
+            // Payment can authorize from them without calling User-Service.
+            const roles = Array.isArray(verified.roles)
+                ? verified.roles.filter((role) => KNOWN_ROLES.has(role))
+                : [];
+            return Object.freeze({ userId: verified.sub, roles: Object.freeze([...new Set(roles)]) });
         } catch {
             throw new Error("Invalid or expired User access token");
         }
