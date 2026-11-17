@@ -15,7 +15,7 @@ export default function Dashboard() {
     const d = data.data;
 
     const todo = [
-        { count: d.bookings_to_confirm, to: "/admin/bookings?status=PENDING", th: "การจองรอยืนยัน", en: "Bookings to confirm" },
+        { count: d.bookings_overdue, to: "/admin/bookings?status=CONFIRMED", th: "เลยเวลานัด ยังไม่รับเครื่อง", en: "Past appointments not checked in" },
         { count: d.unassigned, to: "/admin/work-orders?status=OPEN", th: "ใบงานยังไม่มอบหมายช่าง", en: "Jobs without a technician" },
         { count: d.drafts_to_price, to: "/admin/work-orders?status=OPEN", th: "รายการที่ช่างเสนอ รอตั้งราคา", en: "Proposed items to price" },
         { count: d.ready_for_handover, to: "/admin/work-orders?status=READY", th: "ซ่อมเสร็จ รอส่งมอบ", en: "Ready for handover" },

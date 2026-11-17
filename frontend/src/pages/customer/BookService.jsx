@@ -64,7 +64,7 @@ export default function BookService() {
     if (created) {
         return (
             <div className="stack-lg" style={{ maxWidth: 720 }}>
-                <PageHead title={L("ส่งคำขอจองแล้ว", "Booking sent")} lede={L("ร้านจะยืนยันคิวให้เร็วที่สุด คุณดูสถานะได้ที่หน้าการจองของฉัน", "The shop will confirm soon. You can follow it under My bookings.")} />
+                <PageHead title={L("จองคิวสำเร็จ", "You're booked")} lede={L("คิวของคุณยืนยันแล้ว นำเครื่องและอุปกรณ์ชาร์จมาตามเวลานัด ดูรายละเอียดได้ที่หน้าการจองของฉัน", "Your appointment is confirmed. Bring the device and its charger at that time; details are under My bookings.")} />
                 <Ticket
                     to={`/my/bookings/${created.booking_id}`}
                     number={created.booking_number}
@@ -202,7 +202,7 @@ export default function BookService() {
                         </dl>
                     </div>
                     <div className="notice info">
-                        {L("ราคาจริงจะแจ้งในใบเสนอราคาหลังช่างตรวจเครื่อง ร้านจะไม่เริ่มซ่อมจนกว่าคุณกดอนุมัติ ยกเลิกการจองได้ก่อนถึงเวลานัด", "You'll get a quotation after we check the device, and we won't start until you approve it. You can cancel before your appointment.")}
+                        {L("กดยืนยันแล้วได้คิวทันที ราคาจริงจะแจ้งในใบเสนอราคาหลังช่างตรวจเครื่อง ร้านจะไม่เริ่มซ่อมจนกว่าคุณกดอนุมัติ ยกเลิกการจองได้ก่อนถึงเวลานัด", "Your slot is confirmed as soon as you book. You'll get a quotation after we check the device, and we won't start until you approve it. You can cancel before your appointment.")}
                     </div>
                     <div className="btn-row">
                         <button type="button" className="btn btn-secondary btn-lg" onClick={() => setStep(2)}>{L("ย้อนกลับ", "Back")}</button>

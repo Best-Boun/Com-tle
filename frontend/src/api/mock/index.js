@@ -369,12 +369,27 @@ function bookingHistory(bookingId) {
 }
 
 function changeBooking(b, to, user, { reason = null, changes = {} } = {}) {
-    const allowed = { PENDING: ["CONFIRMED", "CANCELLED"], CONFIRMED: ["COMPLETED", "CANCELLED"], COMPLETED: [], CANCELLED: [] };
+    const allowed = { PENDING: ["CONFIRMED", "CANCELLED", "NO_SHOW"], CONFIRMED: ["COMPLETED", "CANCELLED", "NO_SHOW"], COMPLETED: [], CANCELLED: [], NO_SHOW: [] };
     if (!allowed[b.status].includes(to)) {
         throw bad(`เปลี่ยนสถานะจาก ${b.status} เป็น ${to} ไม่ได้`, `Booking cannot change from ${b.status} to ${to}`, 409);
     }
     getDb().bookingHistory.push({ history_id: newId(), booking_id: b.booking_id, old_status: b.status, new_status: to, changed_by: user.user_id, reason, created_at: now() });
     Object.assign(b, changes, { status: to, updated_at: now() });
+}
+
+const OPEN_BOOKING = ["PENDING", "CONFIRMED"];
+
+/** For the shop: how many times this customer did not come. */
+function withNoShowCount(b) {
+    const count = getDb().bookings.filter((x) => x.customer_id === b.customer_id && x.status === "NO_SHOW").length;
+    return { ...b, customer_no_show_count: count };
+}
+
+function loadOpenBooking(bookingId) {
+    const b = getDb().bookings.find((x) => x.booking_id === bookingId);
+    if (!b) throw bad("ไม่พบการจอง", "Booking not found", 404);
+    if (!OPEN_BOOKING.includes(b.status)) throw bad("การจองนี้ปิดไปแล้ว", "This booking is no longer open", 409);
+    return b;
 }
 
 function loadBooking(bookingId, user) {
@@ -432,8 +447,11 @@ export const bookings = {
             serial_number: input.serial_number?.trim() || null,
             reported_symptom: input.reported_symptom.trim(),
             scheduled_at: scheduledAt,
-            status: "PENDING",
+            // Confirmed straight away, like Booking-Service: capacity was just checked.
+            status: "CONFIRMED",
             work_order_id: null,
+            technician_id: null,
+            technician_claimed_at: null,
             cancelled_at: null,
             cancelled_by: null,
             cancellation_reason: null,
@@ -441,7 +459,7 @@ export const bookings = {
             updated_at: now()
         };
         db.bookings.push(booking);
-        db.bookingHistory.push({ history_id: newId(), booking_id: booking.booking_id, old_status: null, new_status: "PENDING", changed_by: user.user_id, reason: null, created_at: now() });
+        db.bookingHistory.push({ history_id: newId(), booking_id: booking.booking_id, old_status: null, new_status: "CONFIRMED", changed_by: user.user_id, reason: null, created_at: now() });
         return respond(presentBooking(booking), 350);
     }),
 
@@ -459,13 +477,53 @@ export const bookings = {
         if (status) items = items.filter((b) => b.status === status);
         if (date) items = items.filter((b) => b.appointment_date === date);
         items.sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
-        return respond(items);
+        return respond(items.map(withNoShowCount));
     }),
 
     get: handler(async (bookingId) => {
         const user = requireRole("CUSTOMER", "ADMIN");
         const b = loadBooking(bookingId, user);
-        return respond({ ...presentBooking(b), status_history: bookingHistory(bookingId) });
+        const shown = { ...presentBooking(b), status_history: bookingHistory(bookingId) };
+        return respond(has(user, "ADMIN") ? withNoShowCount(shown) : shown);
+    }),
+
+    /** Open bookings today and the next days, earliest first, for technicians. */
+    queue: handler(async ({ days = 2 } = {}) => {
+        requireRole("TECHNICIAN", "ADMIN");
+        const from = bangkokDate(0);
+        const to = bangkokDate(days - 1);
+        const items = getDb().bookings
+            .map(presentBooking)
+            .filter((b) => OPEN_BOOKING.includes(b.status) && b.appointment_date >= from && b.appointment_date <= to)
+            .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
+        return respond(items);
+    }),
+
+    claim: handler(async (bookingId) => {
+        const user = requireRole("TECHNICIAN");
+        const b = loadOpenBooking(bookingId);
+        if (b.technician_id && b.technician_id !== user.user_id) throw bad("ช่างคนอื่นรับงานนี้ไปแล้ว", "Another technician has already taken this job", 409);
+        if (!b.technician_id) Object.assign(b, { technician_id: user.user_id, technician_claimed_at: now(), updated_at: now() });
+        return respond(presentBooking(b));
+    }),
+
+    release: handler(async (bookingId) => {
+        const user = requireRole("TECHNICIAN", "ADMIN");
+        const b = loadOpenBooking(bookingId);
+        if (b.technician_id && !has(user, "ADMIN") && b.technician_id !== user.user_id) {
+            throw bad("คืนงานได้เฉพาะช่างที่รับงานไว้", "Only the technician who took this job can give it back", 403);
+        }
+        Object.assign(b, { technician_id: null, technician_claimed_at: null, updated_at: now() });
+        return respond(presentBooking(b));
+    }),
+
+    /** The customer did not come: only after the appointment time. */
+    markNoShow: handler(async (bookingId, reason) => {
+        const user = requireRole("ADMIN");
+        const b = loadBooking(bookingId, user);
+        if (!slotStarted(b.scheduled_at)) throw bad("บันทึกว่าไม่มาตามนัดได้หลังเลยเวลานัดแล้วเท่านั้น", "A no-show can only be recorded after the appointment time", 409);
+        changeBooking(b, "NO_SHOW", user, { reason: reason?.trim() || null });
+        return respond(withNoShowCount(presentBooking(b)));
     }),
 
     confirm: handler(async (bookingId) => {
@@ -492,7 +550,7 @@ export const bookings = {
     checkIn: handler(async (bookingId, { accessories } = {}) => {
         const user = requireRole("ADMIN");
         const b = loadBooking(bookingId, user);
-        if (b.status !== "CONFIRMED") throw bad("ต้องยืนยันการจองก่อนรับเครื่อง", "Confirm the booking before check-in", 409);
+        if (!OPEN_BOOKING.includes(b.status)) throw bad("การจองนี้ปิดไปแล้ว", "This booking is no longer open", 409);
         if (b.work_order_id) throw bad("การจองนี้มีใบงานแล้ว", "This booking already has a work order", 409);
         const wo = createWorkOrder({
             source: "BOOKING",
@@ -509,6 +567,12 @@ export const bookings = {
             reported_symptom: b.reported_symptom,
             accessories: accessories?.trim() || null
         }, user, "รับเครื่องจากการจอง " + b.booking_number);
+        // The technician who took this booking gets the work order straight away.
+        const tech = b.technician_id && getDb().users.find((u) => u.user_id === b.technician_id && has(u, "TECHNICIAN"));
+        if (tech) {
+            wo.technician_id = tech.user_id;
+            getDb().workOrderHistory.push({ id: newId(), work_order_id: wo.work_order_id, old_status: wo.status, new_status: wo.status, changed_by: user.user_id, note: `มอบหมายให้ ${tech.full_name} (รับงานจากคิว)`, created_at: now() });
+        }
         changeBooking(b, "COMPLETED", user, { changes: { work_order_id: wo.work_order_id } });
         return respond({ booking: presentBooking(b), work_order: wo }, 400);
     })
@@ -1123,7 +1187,7 @@ export const dashboard = {
         return respond({
             today,
             bookings_today: bookingsToday.length,
-            bookings_to_confirm: db.bookings.filter((b) => b.status === "PENDING").length,
+            bookings_overdue: db.bookings.filter((b) => OPEN_BOOKING.includes(b.status) && slotStarted(b.scheduled_at)).length,
             open_work_orders: wos.filter((w) => OPEN_WO.includes(w.status)).length,
             waiting_approval: wos.filter((w) => w.status === "WAITING_APPROVAL").length,
             drafts_to_price: db.quotations.filter((q) => q.status === "DRAFT").length,

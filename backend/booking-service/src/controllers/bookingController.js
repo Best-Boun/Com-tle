@@ -53,6 +53,26 @@ function createBookingController(bookingService) {
             res.status(200).json(successResponse("Booking cancelled", booking));
         }),
 
+        queue: handle(async (req, res) => {
+            const items = await bookingService.listQueue(req.query, req.user);
+            res.status(200).json(successResponse("Upcoming bookings retrieved", items));
+        }),
+
+        claim: handle(async (req, res) => {
+            const booking = await bookingService.claimBooking(req.params.bookingId, req.user);
+            res.status(200).json(successResponse("Job taken", booking));
+        }),
+
+        release: handle(async (req, res) => {
+            const booking = await bookingService.releaseBooking(req.params.bookingId, req.user);
+            res.status(200).json(successResponse("Job given back", booking));
+        }),
+
+        noShow: handle(async (req, res) => {
+            const booking = await bookingService.markNoShow(req.params.bookingId, req.body, req.user);
+            res.status(200).json(successResponse("No-show recorded", booking));
+        }),
+
         checkIn: handle(async (req, res) => {
             const booking = await bookingService.checkIn(
                 req.params.bookingId,

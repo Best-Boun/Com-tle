@@ -1,7 +1,7 @@
 const crypto = require("node:crypto");
 const jwt = require("jsonwebtoken");
 const AppError = require("../../shared/errors/AppError");
-const { SLOT_OCCUPYING_STATUSES } = require("../src/constants");
+const { OPEN_STATUSES, SLOT_OCCUPYING_STATUSES } = require("../src/constants");
 
 const ISSUER = "test-issuer";
 const AUDIENCE = "test-audience";
@@ -80,6 +80,8 @@ function createFakeBookingRepository() {
                 ...booking,
                 scheduled_at: new Date(booking.scheduled_at),
                 work_order_id: null,
+                technician_id: null,
+                technician_claimed_at: null,
                 cancelled_at: null,
                 cancelled_by: null,
                 cancellation_reason: null
@@ -107,6 +109,34 @@ function createFakeBookingRepository() {
             if (!current || current.status !== fromStatus) return false;
             bookings.set(id, { ...current, ...changes });
             return true;
+        },
+        async listOpenBetween(from, to) {
+            return [...bookings.values()]
+                .filter((b) => OPEN_STATUSES.includes(b.status) && b.scheduled_at >= from && b.scheduled_at < to)
+                .sort((a, b) => a.scheduled_at - b.scheduled_at)
+                .map((b) => ({ ...b }));
+        },
+        async claim(id, technicianId, claimedAt) {
+            const current = bookings.get(id);
+            if (!current || current.technician_id || !OPEN_STATUSES.includes(current.status)) return false;
+            bookings.set(id, { ...current, technician_id: technicianId, technician_claimed_at: claimedAt });
+            return true;
+        },
+        async release(id, technicianId = null) {
+            const current = bookings.get(id);
+            if (!current || !OPEN_STATUSES.includes(current.status)) return false;
+            if (technicianId && current.technician_id !== technicianId) return false;
+            bookings.set(id, { ...current, technician_id: null, technician_claimed_at: null });
+            return true;
+        },
+        async countNoShows(customerIds) {
+            const counts = new Map();
+            for (const b of bookings.values()) {
+                if (b.status === "NO_SHOW" && customerIds.includes(b.customer_id)) {
+                    counts.set(b.customer_id, (counts.get(b.customer_id) || 0) + 1);
+                }
+            }
+            return counts;
         }
     };
 }

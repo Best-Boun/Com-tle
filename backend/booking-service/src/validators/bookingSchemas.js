@@ -40,7 +40,13 @@ const listQuerySchema = z.object({
 
 const uuidSchema = z.string().uuid();
 
+/** Technicians' upcoming queue: today plus the next days (default today + tomorrow). */
+const queueQuerySchema = z.object({
+    days: z.coerce.number().int().min(1).max(7).optional()
+});
+
 module.exports = {
+    queueQuerySchema,
     createBookingSchema,
     reasonSchema,
     requiredReasonSchema,

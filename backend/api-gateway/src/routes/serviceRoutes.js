@@ -48,11 +48,14 @@ const UUID = "[0-9a-fA-F-]{36}";
 const bookingRoutePatterns = [
     ["GET", /^\/availability$/],
     ["GET", /^\/me$/],
+    ["GET", /^\/queue$/],
     ["GET", /^\/$/],
     ["POST", /^\/$/],
     ["GET", new RegExp(`^\\/${UUID}$`)],
-    ["PATCH", new RegExp(`^\\/${UUID}\\/(?:confirm|cancel)$`)],
-    ["POST", new RegExp(`^\\/${UUID}\\/check-in$`)]
+    ["PATCH", new RegExp(`^\\/${UUID}\\/(?:confirm|cancel|no-show)$`)],
+    ["POST", new RegExp(`^\\/${UUID}\\/check-in$`)],
+    ["POST", new RegExp(`^\\/${UUID}\\/claim$`)],
+    ["DELETE", new RegExp(`^\\/${UUID}\\/claim$`)]
 ];
 
 // Catalog-Service routes under /api/catalog.

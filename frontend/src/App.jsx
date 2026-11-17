@@ -19,6 +19,7 @@ import Profile from "./pages/customer/Profile.jsx";
 import TechJobs from "./pages/technician/TechJobs.jsx";
 import TechJobDetail from "./pages/technician/TechJobDetail.jsx";
 import TechParts from "./pages/technician/TechParts.jsx";
+import TechQueue from "./pages/technician/TechQueue.jsx";
 
 import Dashboard from "./pages/admin/Dashboard.jsx";
 import AdminBookings from "./pages/admin/AdminBookings.jsx";
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="tech" element={<RequireRole roles={["TECHNICIAN"]}><StaffLayout /></RequireRole>}>
                 <Route index element={<TechJobs />} />
                 <Route path="jobs/:workOrderId" element={<TechJobDetail />} />
+                <Route path="queue" element={<TechQueue />} />
                 <Route path="parts" element={<TechParts />} />
             </Route>
 

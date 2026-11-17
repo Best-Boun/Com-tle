@@ -28,7 +28,9 @@ const createBookingWorkOrderSchema = z.object({
     serial_number: nullableText(150),
     accessories: nullableText(1000),
     reported_symptom: z.string().trim().min(1).max(5000),
-    scheduled_at: z.string().datetime({ offset: true })
+    scheduled_at: z.string().datetime({ offset: true }),
+    // The technician who took the booking before the customer arrived.
+    technician_user_id: z.string().uuid().optional()
 }).strict();
 
 const listWorkOrdersSchema = z.object({

@@ -84,7 +84,7 @@ const dashboard = USING_MOCK ? mock.dashboard : {
         return {
             today,
             bookings_today: bookings.bookings_today,
-            bookings_to_confirm: bookings.bookings_to_confirm,
+            bookings_overdue: bookings.bookings_overdue,
             open_work_orders: workOrders.filter((workOrder) => OPEN_WORK_ORDER_STATUSES.includes(workOrder.status)).length,
             waiting_approval: count("WAITING_APPROVAL"),
             drafts_to_price: workOrders.reduce(

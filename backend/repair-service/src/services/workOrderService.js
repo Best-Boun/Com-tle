@@ -165,6 +165,22 @@ function createWorkOrderService({
             return present(duplicate);
         }
 
+        // A technician took this booking in the queue: the job goes straight to
+        // them. If that fails the work order still stands; the shop assigns it.
+        if (booking.technician_user_id) {
+            try {
+                const result = await workOrderRepository.assignTechnician(
+                    workOrderId,
+                    booking.technician_user_id
+                );
+                if (result?.workOrder) {
+                    return present(result.workOrder);
+                }
+            } catch {
+                // keep the unassigned work order
+            }
+        }
+
         return present(workOrder, [initialHistory]);
     }
 
