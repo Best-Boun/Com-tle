@@ -11,7 +11,7 @@ const UNIQUE = {
 };
 
 function memoryDb() {
-    const tables = { deposits: [], payment_audit_logs: [], outbox_events: [], idempotency_records: [] };
+    const tables = { deposits: [], deposit_audit_logs: [], idempotency_records: [] };
 
     function query(name) {
         const filters = [];
@@ -89,8 +89,8 @@ test("a customer pays the deposit once for their own held booking", async () => 
     assert.equal(paid.status, "PAID");
     assert.equal(paid.amount, 200);
     assert.match(paid.reference_number, /^MOCK-[A-Z0-9]{12}$/);
-    assert.equal(db.tables.payment_audit_logs[0].action, "deposit.paid");
-    assert.equal(db.tables.outbox_events[0].event_type, "deposit.paid");
+    assert.equal(db.tables.deposit_audit_logs[0].action, "deposit.paid");
+    assert.equal(db.tables.deposit_audit_logs[0].deposit_id, paid.deposit_id);
 
     // Paying again returns the same deposit; a different person never can.
     assert.equal((await payments.payDeposit(CUSTOMER, { booking_id: "b-1", payment_method: "CARD" }, "key-0000002", AUTH)).deposit_id, paid.deposit_id);
@@ -142,7 +142,7 @@ test("settle follows the booking: refund on cancel, forfeit on no-show, apply on
     // Settled once: later calls change nothing, even if the booking changed.
     bookings.get("b-cancel").status = "NO_SHOW";
     assert.equal((await payments.settleDeposit(SHOP, "b-cancel", AUTH)).status, "REFUNDED");
-    assert.deepEqual(db.tables.payment_audit_logs.map((a) => a.action).filter((a) => a !== "deposit.paid"),
+    assert.deepEqual(db.tables.deposit_audit_logs.map((a) => a.action).filter((a) => a !== "deposit.paid"),
         ["deposit.refunded", "deposit.forfeited", "deposit.applied"]);
     await assert.rejects(payments.settleDeposit(OTHER, "b-open", AUTH), { statusCode: 404 });
 });
