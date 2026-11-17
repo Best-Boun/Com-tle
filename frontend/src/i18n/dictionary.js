@@ -12,6 +12,7 @@ export const DICT = {
         "status.booking.CONFIRMED": "ยืนยันแล้ว",
         "status.booking.COMPLETED": "รับเครื่องแล้ว",
         "status.booking.CANCELLED": "ยกเลิก",
+        "status.booking.NO_SHOW": "ไม่มาตามนัด",
 
         "status.wo.RECEIVED": "รับเครื่อง",
         "status.wo.PENDING": "รอตรวจเช็ก",
@@ -79,6 +80,7 @@ export const DICT = {
         "status.booking.CONFIRMED": "Confirmed",
         "status.booking.COMPLETED": "Device received",
         "status.booking.CANCELLED": "Cancelled",
+        "status.booking.NO_SHOW": "No-show",
 
         "status.wo.RECEIVED": "Device received",
         "status.wo.PENDING": "Waiting for inspection",
@@ -141,7 +143,7 @@ export const DICT = {
 
 /** Badge colour per status: amber = waiting on someone, blue = in progress, green = done. */
 export const TONES = {
-    booking: { PENDING: "amber", CONFIRMED: "blue", COMPLETED: "green", CANCELLED: "grey" },
+    booking: { PENDING: "amber", CONFIRMED: "blue", COMPLETED: "green", CANCELLED: "grey", NO_SHOW: "red" },
     wo: { PENDING: "grey", DIAGNOSING: "blue", WAITING_APPROVAL: "amber", APPROVED: "blue", REPAIRING: "blue", TESTING: "blue", COMPLETED: "green", CANCELLED: "grey", HANDED_OVER: "green" },
     quote: { DRAFT: "grey", SENT: "amber", APPROVED: "green", REJECTED: "red" },
     pay: { UNPAID: "red", PARTIAL: "amber", PAID: "green", PARTIALLY_REFUNDED: "blue", REFUNDED: "grey" },

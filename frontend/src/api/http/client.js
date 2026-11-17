@@ -40,6 +40,10 @@ const THAI = {
     "Cannot disable the last active administrator": "ปิดผู้ดูแลคนสุดท้ายไม่ได้",
     "Invalid account status transition": "เปลี่ยนสถานะบัญชีนี้ไม่ได้",
     "Too many requests": "ทำรายการบ่อยเกินไป กรุณารอสักครู่",
+    "This booking is no longer open": "การจองนี้ปิดไปแล้ว",
+    "Another technician has already taken this job": "ช่างคนอื่นรับงานนี้ไปแล้ว",
+    "Only the technician who took this job can give it back": "คืนงานได้เฉพาะช่างที่รับงานไว้",
+    "A no-show can only be recorded after the appointment time": "บันทึกว่าไม่มาตามนัดได้หลังเลยเวลานัดแล้วเท่านั้น",
     "Cannot remove the user's final role": "ต้องเหลือสิทธิ์อย่างน้อย 1 อย่าง",
     "User does not have this role": "บัญชีนี้ไม่มีสิทธิ์นี้",
     "Invalid role assignment": "ให้สิทธิ์นี้จากหน้าเว็บไม่ได้"

@@ -75,7 +75,9 @@ export default function RepairDetail() {
                     <section className="stack">
                         <h2>{L("ใบเสนอราคา", "Quotations")}</h2>
                         {w.quotations.filter((q) => q.status !== "DRAFT").length === 0 && (
-                            <p className="muted">{L("ช่างกำลังตรวจเช็ก ร้านจะส่งใบเสนอราคามาให้อนุมัติที่นี่", "The technician is checking your device. The quotation will appear here.")}</p>
+                            <p className="muted">{w.status === "PENDING"
+                                ? L("ร้านรับเครื่องแล้ว รอช่างเริ่มตรวจเช็ก ใบเสนอราคาจะส่งมาให้อนุมัติที่นี่", "Your device is in. A technician will start checking it; the quotation will appear here.")
+                                : L("ช่างกำลังตรวจเช็ก ร้านจะส่งใบเสนอราคามาให้อนุมัติที่นี่", "The technician is checking your device. The quotation will appear here.")}</p>
                         )}
                         {w.quotations.filter((q) => q.status !== "DRAFT").map((q) => (
                             <QuotationCard key={q.quotation_id} quotation={q} superseded={q.status === "REJECTED"}>

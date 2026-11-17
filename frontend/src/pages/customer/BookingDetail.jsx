@@ -42,6 +42,7 @@ export default function BookingDetail() {
                     <span>{L("ร้านรับเครื่องแล้ว ", "We've received your device. ")}<Link to={`/my/repairs/${b.work_order_id}`}>{L("ติดตามงานซ่อม", "Track the repair")}</Link></span>
                 </div>
             )}
+            {b.status === "NO_SHOW" && <div className="notice error">{L("ร้านบันทึกว่าคุณไม่ได้มาตามนัดนี้ ถ้าต้องการซ่อม จองคิวใหม่ได้เลย", "The shop recorded that you missed this appointment. Book a new one any time.")}</div>}
             {b.status === "CANCELLED" && <div className="notice error">{L("ยกเลิกแล้ว", "Cancelled")}{b.cancellation_reason ? ` — ${b.cancellation_reason}` : ""}</div>}
 
             <section className="panel">

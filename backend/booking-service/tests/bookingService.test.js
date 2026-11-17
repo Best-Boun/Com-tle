@@ -51,11 +51,12 @@ test("time helpers convert Bangkok wall-clock time to UTC and back", () => {
     assert.deepEqual(utcToZoned(utc, "Asia/Bangkok"), { date: "2026-11-12", time: "10:00" });
 });
 
-test("createBooking stores UTC scheduled_at, team columns, and starts as PENDING", async () => {
+test("createBooking stores UTC scheduled_at, team columns, and is confirmed straight away", async () => {
     const { service, repo, clients } = setup();
     const booking = await service.createBooking(bookingInput(), CUSTOMER, CTX);
 
-    assert.equal(booking.status, "PENDING");
+    assert.equal(booking.status, "CONFIRMED");
+    assert.equal(booking.technician_id, null);
     assert.equal(booking.customer_id, CUSTOMER.userId);
     assert.equal(booking.scheduled_at, "2026-11-12T03:00:00.000Z");
     assert.equal(booking.appointment_date, "2026-11-12");
@@ -69,7 +70,7 @@ test("createBooking stores UTC scheduled_at, team columns, and starts as PENDING
     assert.equal(booking.service_currency, "THB");
     assert.equal(clients.calls.catalog[0].ctx.authorization, "Bearer token");
     assert.equal(repo.history.length, 1);
-    assert.equal(repo.history[0].new_status, "PENDING");
+    assert.equal(repo.history[0].new_status, "CONFIRMED");
     assert.equal(repo.history[0].old_status, null);
 });
 
@@ -80,7 +81,7 @@ test("createBooking rejects non-slot times, past slots and far-future dates", as
     await assert.rejects(service.createBooking(bookingInput({ appointment_date: "2026-11-10" }), CUSTOMER, CTX), { statusCode: 400 });
     await assert.rejects(service.createBooking(bookingInput({ appointment_date: "2026-12-12" }), CUSTOMER, CTX), { statusCode: 400 });
     const ok = await service.createBooking(bookingInput({ appointment_date: "2026-11-11", appointment_time: "11:00" }), CUSTOMER, CTX);
-    assert.equal(ok.status, "PENDING");
+    assert.equal(ok.status, "CONFIRMED");
 });
 
 test("createBooking rejects invalid dates and fields the client must not set", async () => {
@@ -107,7 +108,7 @@ test("slot capacity is enforced and cancelled bookings free the slot", async () 
 
     await service.cancelBooking(first.booking_id, {}, CUSTOMER);
     const again = await service.createBooking(bookingInput(), CUSTOMER, CTX);
-    assert.equal(again.status, "PENDING");
+    assert.equal(again.status, "CONFIRMED");
 });
 
 test("availability reports remaining capacity and closes past slots", async () => {
@@ -145,14 +146,12 @@ test("listMyBookings only returns the caller's bookings and filters by local dat
     assert.equal(day.items[0].appointment_date, "2026-11-13");
 });
 
-test("confirm then check-in creates exactly one work order and completes the booking", async () => {
+test("check-in of a new (already confirmed) booking creates exactly one work order", async () => {
     const { service, clients, repo } = setup();
     const booking = await service.createBooking(bookingInput(), CUSTOMER, CTX);
 
-    await assert.rejects(service.checkIn(booking.booking_id, ADMIN, CTX), { statusCode: 409 });
-
-    const confirmed = await service.confirmBooking(booking.booking_id, ADMIN);
-    assert.equal(confirmed.status, "CONFIRMED");
+    // Already confirmed: confirming again is not a valid transition.
+    await assert.rejects(service.confirmBooking(booking.booking_id, ADMIN), { statusCode: 409 });
 
     const completed = await service.checkIn(booking.booking_id, ADMIN, CTX, { accessories: "Charger" });
     assert.equal(completed.status, "COMPLETED");
@@ -163,14 +162,14 @@ test("confirm then check-in creates exactly one work order and completes the boo
 
     await assert.rejects(service.checkIn(booking.booking_id, ADMIN, CTX), { statusCode: 409 });
     assert.equal(clients.calls.repair.length, 1);
-    assert.deepEqual(repo.history.map((h) => h.new_status), ["PENDING", "CONFIRMED", "COMPLETED"]);
+    assert.deepEqual(repo.history.map((h) => h.new_status), ["CONFIRMED", "COMPLETED"]);
+    assert.equal(clients.calls.repair[0].payload.technician_user_id, undefined);
     assert.ok(repo.history.every((h) => h.changed_by));
 });
 
 test("check-in keeps the booking CONFIRMED when Repair fails; retry reuses the key", async () => {
     const { service, clients } = setup();
     const booking = await service.createBooking(bookingInput(), CUSTOMER, CTX);
-    await service.confirmBooking(booking.booking_id, ADMIN);
 
     clients.state.repairFails = true;
     await assert.rejects(service.checkIn(booking.booking_id, ADMIN, CTX), { statusCode: 503 });
@@ -221,4 +220,65 @@ test("the service snapshot keeps the price from booking time", async () => {
     });
     const later = await service.getBooking(booking.booking_id, CUSTOMER);
     assert.equal(later.service_starting_price, 500);
+});
+
+const TECH = { userId: "bbbbbbbb-0000-4000-8000-000000000001", roles: ["TECHNICIAN"] };
+const OTHER_TECH = { userId: "bbbbbbbb-0000-4000-8000-000000000002", roles: ["TECHNICIAN"] };
+
+test("no-show: only after the appointment time, final, and counted per customer for the shop", async () => {
+    const { service, repo, clients } = setup();
+    const booking = await service.createBooking(bookingInput({ appointment_date: "2026-11-11", appointment_time: "11:00" }), CUSTOMER, CTX);
+
+    await assert.rejects(service.markNoShow(booking.booking_id, {}, ADMIN), { statusCode: 409 });
+
+    const later = makeService(repo, clients, new Date("2026-11-11T05:00:00Z")); // 12:00 Bangkok
+    const marked = await later.markNoShow(booking.booking_id, { reason: "โทรไม่รับ" }, ADMIN);
+    assert.equal(marked.status, "NO_SHOW");
+    assert.equal(repo.history.at(-1).new_status, "NO_SHOW");
+    assert.equal(repo.history.at(-1).reason, "โทรไม่รับ");
+
+    await assert.rejects(later.checkIn(booking.booking_id, ADMIN, CTX), { statusCode: 409 });
+    await assert.rejects(later.cancelBooking(booking.booking_id, { reason: "x" }, ADMIN), { statusCode: 409 });
+
+    await later.createBooking(bookingInput({ appointment_date: "2026-11-12" }), CUSTOMER, CTX);
+    const { items } = await later.listBookings({});
+    assert.ok(items.every((b) => b.customer_no_show_count === 1));
+    assert.equal((await later.getBooking(booking.booking_id, ADMIN)).customer_no_show_count, 1);
+    assert.equal((await later.getBooking(booking.booking_id, CUSTOMER)).customer_no_show_count, undefined);
+});
+
+test("queue lists open bookings from today for the next days, earliest first", async () => {
+    const { service } = setup();
+    const later = await service.createBooking(bookingInput({ appointment_date: "2026-11-12", appointment_time: "13:00" }), CUSTOMER, CTX);
+    const today = await service.createBooking(bookingInput({ appointment_date: "2026-11-11", appointment_time: "11:00" }), CUSTOMER, CTX);
+    await service.createBooking(bookingInput({ appointment_date: "2026-11-14" }), CUSTOMER, CTX);
+    const cancelled = await service.createBooking(bookingInput({ appointment_date: "2026-11-12", appointment_time: "09:00" }), OTHER_CUSTOMER, CTX);
+    await service.cancelBooking(cancelled.booking_id, {}, OTHER_CUSTOMER);
+
+    const queue = await service.listQueue({});
+    assert.deepEqual(queue.map((b) => b.booking_id), [today.booking_id, later.booking_id]);
+    assert.equal((await service.listQueue({ days: 4 })).length, 3);
+    await assert.rejects(service.listQueue({ days: 30 }), { statusCode: 400 });
+});
+
+test("a technician takes a booking first-come, can give it back, and check-in hands the job over", async () => {
+    const { service, clients } = setup();
+    const booking = await service.createBooking(bookingInput(), CUSTOMER, CTX);
+
+    const taken = await service.claimBooking(booking.booking_id, TECH);
+    assert.equal(taken.technician_id, TECH.userId);
+    assert.ok(taken.technician_claimed_at);
+    assert.equal((await service.claimBooking(booking.booking_id, TECH)).technician_id, TECH.userId);
+    await assert.rejects(service.claimBooking(booking.booking_id, OTHER_TECH), { statusCode: 409 });
+    await assert.rejects(service.releaseBooking(booking.booking_id, OTHER_TECH), { statusCode: 403 });
+
+    assert.equal((await service.releaseBooking(booking.booking_id, TECH)).technician_id, null);
+    await service.claimBooking(booking.booking_id, OTHER_TECH);
+    assert.equal((await service.releaseBooking(booking.booking_id, ADMIN)).technician_id, null);
+
+    await service.claimBooking(booking.booking_id, TECH);
+    await service.checkIn(booking.booking_id, ADMIN, CTX);
+    assert.equal(clients.calls.repair[0].payload.technician_user_id, TECH.userId);
+    await assert.rejects(service.claimBooking(booking.booking_id, OTHER_TECH), { statusCode: 409 });
+    await assert.rejects(service.claimBooking("not-a-uuid", TECH), { statusCode: 404 });
 });

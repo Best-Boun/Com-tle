@@ -256,10 +256,10 @@ export default function AdminWorkOrderDetail() {
                             <h3>{L("การเงิน", "Payment")}</h3>
                         </div>
                         <PaymentSummary payment={w.payment} />
-                        <div className="btn-row">
+                        {(w.payment.due > 0 || w.payment.paid > 0) && <div className="btn-row">
                             <button type="button" className="btn btn-secondary btn-sm" disabled={w.payment.balance <= 0 || w.status === "CANCELLED"} onClick={() => { setForm({ amount: String(w.payment.balance), method: "CASH", note: "" }); setModal("pay"); }}>{L("รับชำระ", "Take payment")}</button>
                             <button type="button" className="btn btn-ghost btn-sm" disabled={refundable <= 0} onClick={() => { setForm({ amount: "", note: "" }); setModal("refund"); }}>{L("ขอคืนเงิน", "Request refund")}</button>
-                        </div>
+                        </div>}
                         {w.payments.length > 0 && (
                             <ul className="small muted" style={{ margin: 0, paddingLeft: 18 }}>
                                 {w.payments.map((p) => <li key={p.payment_id}>{fmt.dateTime(p.created_at)} · {t(`pay.type.${p.type}`)} {fmt.money(p.amount)}{p.type === "PAYMENT" ? ` · ${t(`pay.method.${p.method}`)}` : ""}{p.note ? ` · ${p.note}` : ""}</li>)}

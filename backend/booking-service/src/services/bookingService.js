@@ -4,7 +4,7 @@ const { PERMISSIONS } = require("../../../shared/constants");
 const { hasPermission } = require("../../../shared/middleware/serviceAuth");
 const { getPagination, getPaginationMeta } = require("../../../shared/utils/pagination");
 const { parseOrThrow } = require("../../../shared/utils/validation");
-const { BOOKING_STATUS, ALLOWED_TRANSITIONS } = require("../constants");
+const { BOOKING_STATUS, OPEN_STATUSES, ALLOWED_TRANSITIONS } = require("../constants");
 const {
     nowInTimezone,
     zonedToUtc,
@@ -18,6 +18,7 @@ const {
     requiredReasonSchema,
     availabilityQuerySchema,
     listQuerySchema,
+    queueQuerySchema,
     uuidSchema
 } = require("../validators/bookingSchemas");
 
@@ -152,6 +153,20 @@ function createBookingService({
         return { items: items.map(present), meta: getPaginationMeta(total, page, limit) };
     }
 
+    /** For the shop: how many times each customer did not come (customer_no_show_count). */
+    async function withNoShowCounts(items) {
+        const counts = await repo.countNoShows([...new Set(items.map((b) => b.customer_id))]);
+        return items.map((b) => ({ ...b, customer_no_show_count: counts.get(b.customer_id) || 0 }));
+    }
+
+    async function loadOpenBooking(bookingId) {
+        const booking = await loadBooking(bookingId);
+        if (!OPEN_STATUSES.includes(booking.status)) {
+            throw new AppError("This booking is no longer open", 409);
+        }
+        return booking;
+    }
+
     return {
         async getAvailability(query) {
             const { date } = parseOrThrow(availabilityQuerySchema, query, "Invalid query");
@@ -206,13 +221,15 @@ function createBookingService({
                             serial_number: data.serial_number || null,
                             reported_symptom: data.reported_symptom,
                             scheduled_at: scheduledAt,
-                            status: BOOKING_STATUS.PENDING
+                            // Confirmed straight away: the slot's capacity was just
+                            // checked under its lock, so the shop can take it.
+                            status: BOOKING_STATUS.CONFIRMED
                         });
                         await repo.insertHistory(trx, {
                             history_id: createId(),
                             booking_id: bookingId,
                             old_status: null,
-                            new_status: BOOKING_STATUS.PENDING,
+                            new_status: BOOKING_STATUS.CONFIRMED,
                             changed_by: user.userId,
                             reason: null
                         });
@@ -239,13 +256,67 @@ function createBookingService({
 
         async listBookings(query) {
             const filters = parseOrThrow(listQuerySchema, query, "Invalid query");
-            return listWith({ customerId: filters.customer_id }, filters);
+            const result = await listWith({ customerId: filters.customer_id }, filters);
+            return { ...result, items: await withNoShowCounts(result.items) };
         },
 
         async getBooking(bookingId, user) {
             const booking = await loadVisibleBooking(bookingId, user);
             const history = await repo.findHistory(booking.booking_id);
-            return { ...present(booking), status_history: history };
+            const shown = { ...present(booking), status_history: history };
+            return canManage(user) ? (await withNoShowCounts([shown]))[0] : shown;
+        },
+
+        /**
+         * Upcoming open bookings (today first) for technicians to see what is
+         * coming and take a job before the device arrives.
+         */
+        async listQueue(query) {
+            const { days = 2 } = parseOrThrow(queueQuerySchema, query, "Invalid query");
+            const today = nowInTimezone(tz, now()).date;
+            const from = dayRangeUtc(today, tz).start;
+            const to = dayRangeUtc(addDays(today, days - 1), tz).end;
+            const items = await repo.listOpenBetween(from, to);
+            return items.map(present);
+        },
+
+        async claimBooking(bookingId, user) {
+            const booking = await loadOpenBooking(bookingId);
+            if (booking.technician_id === user.userId) return present(booking);
+            if (booking.technician_id) {
+                throw new AppError("Another technician has already taken this job", 409);
+            }
+            if (!await repo.claim(booking.booking_id, user.userId, now())) {
+                const current = await repo.findById(booking.booking_id);
+                if (current?.technician_id === user.userId) return present(current);
+                throw new AppError("Another technician has already taken this job", 409);
+            }
+            return present(await repo.findById(booking.booking_id));
+        },
+
+        /** The technician who took the job, or the shop, gives it back to the queue. */
+        async releaseBooking(bookingId, user) {
+            const booking = await loadOpenBooking(bookingId);
+            if (!booking.technician_id) return present(booking);
+            const managing = canManage(user);
+            if (!managing && booking.technician_id !== user.userId) {
+                throw new AppError("Only the technician who took this job can give it back", 403);
+            }
+            await repo.release(booking.booking_id, managing ? null : user.userId);
+            return present(await repo.findById(booking.booking_id));
+        },
+
+        /**
+         * The customer did not come. Only after the appointment time, and
+         * separate from a cancellation so no-shows can be counted per customer.
+         */
+        async markNoShow(bookingId, input, user) {
+            const booking = await loadBooking(bookingId);
+            if (!hasStarted(booking.scheduled_at)) {
+                throw new AppError("A no-show can only be recorded after the appointment time", 409);
+            }
+            const { reason } = parseOrThrow(reasonSchema, input || {}, "Invalid no-show details");
+            return changeStatus(booking, BOOKING_STATUS.NO_SHOW, user, { reason: reason || null });
         },
 
         async confirmBooking(bookingId, user) {
@@ -311,7 +382,9 @@ function createBookingService({
                     serial_number: booking.serial_number,
                     accessories: typeof accessories === "string" ? accessories.trim() || null : null,
                     reported_symptom: booking.reported_symptom,
-                    scheduled_at: new Date(booking.scheduled_at).toISOString()
+                    scheduled_at: new Date(booking.scheduled_at).toISOString(),
+                    // The technician who took this booking gets the work order.
+                    ...(booking.technician_id ? { technician_user_id: booking.technician_id } : {})
                 },
                 { authorization, idempotencyKey: `booking-${booking.booking_id}` }
             );

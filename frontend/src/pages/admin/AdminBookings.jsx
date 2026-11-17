@@ -13,6 +13,9 @@ export default function AdminBookings() {
     const status = params.get("status") || "";
     const date = params.get("date") || "";
     const list = useAsync(() => api.bookings.listAll({ status, date }), [status, date]);
+    const techs = useAsync(() => api.auth.listTechnicians(), []);
+    const techName = (id) => techs.data?.find((u) => u.user_id === id)?.full_name || L("ช่าง", "Technician");
+    const [noShow, setNoShow] = useState(null);
     const [run, busy] = useAction();
     const [cancelling, setCancelling] = useState(null);
     const [checkingIn, setCheckingIn] = useState(null);
@@ -39,6 +42,18 @@ export default function AdminBookings() {
         }
     }
 
+    async function markNoShow() {
+        const ok = await run(() => api.bookings.markNoShow(noShow.booking_id, text), L("บันทึกว่าลูกค้าไม่มาตามนัดแล้ว", "No-show recorded")).catch(() => null);
+        if (ok) {
+            setNoShow(null);
+            setText("");
+            list.reload();
+        }
+    }
+
+    const isOpen = (b) => ["PENDING", "CONFIRMED"].includes(b.status);
+    const timePassed = (b) => new Date(b.scheduled_at).getTime() <= Date.now();
+
     async function checkIn() {
         const result = await run(() => api.bookings.checkIn(checkingIn.booking_id, { accessories: text }), L("รับเครื่องและเปิดใบงานแล้ว", "Device received, work order opened")).catch(() => null);
         if (result) navigate(`/admin/work-orders/${result.work_order.work_order_id}`);
@@ -46,11 +61,11 @@ export default function AdminBookings() {
 
     return (
         <div>
-            <PageHead title={L("การจอง", "Bookings")} lede={L("ยืนยันคิว รับเครื่องเมื่อลูกค้ามาถึง (จะเปิดใบงานซ่อมให้อัตโนมัติ)", "Confirm bookings, and check devices in when customers arrive — this opens the work order.")} />
+            <PageHead title={L("การจอง", "Bookings")} lede={L("การจองยืนยันอัตโนมัติ รับเครื่องเมื่อลูกค้ามาถึง (เปิดใบงานให้ช่างที่รับงานไว้) ถ้าเลยเวลานัดแล้วลูกค้าไม่มา กด “ไม่มาตามนัด”", "Bookings confirm themselves. Check devices in when customers arrive (the work order goes to the technician who took it); mark no-shows once the time has passed.")} />
             <div className="filters">
                 <TextField as="select" label={L("สถานะ", "Status")} value={status} onChange={(e) => setFilter("status", e.target.value)}>
                     <option value="">{t("common.all")}</option>
-                    {["PENDING", "CONFIRMED", "COMPLETED", "CANCELLED"].map((s) => <option key={s} value={s}>{t(`status.booking.${s}`)}</option>)}
+                    {["CONFIRMED", "COMPLETED", "NO_SHOW", "CANCELLED", "PENDING"].map((s) => <option key={s} value={s}>{t(`status.booking.${s}`)}</option>)}
                 </TextField>
                 <TextField type="date" label={L("วันนัด", "Date")} value={date} onChange={(e) => setFilter("date", e.target.value)} />
                 {(status || date) && <button type="button" className="btn btn-ghost" onClick={() => setParams({}, { replace: true })}>{L("ล้างตัวกรอง", "Clear filters")}</button>}
@@ -76,14 +91,22 @@ export default function AdminBookings() {
                                 <tr key={b.booking_id}>
                                     <td className="num">{fmt.day(b.appointment_date)}<div className="faint small">{b.appointment_time}</div></td>
                                     <td className="num">{b.booking_number}</td>
-                                    <td>{b.customer_name}</td>
+                                    <td>
+                                        {b.customer_name}
+                                        {b.customer_no_show_count > 0 && <div><span className="badge tone-red">{L(`เคยไม่มาตามนัด ${b.customer_no_show_count} ครั้ง`, `${b.customer_no_show_count} past no-show${b.customer_no_show_count > 1 ? "s" : ""}`)}</span></div>}
+                                    </td>
                                     <td>{b.service_name}<div className="faint small">{[b.device_type, b.brand, b.model].filter(Boolean).join(" · ")} — {b.reported_symptom}</div></td>
-                                    <td><StatusBadge kind="booking" status={b.status} /></td>
+                                    <td>
+                                        <StatusBadge kind="booking" status={b.status} />
+                                        {isOpen(b) && <div className="faint small">{b.technician_id ? L(`ช่างที่รับงาน: ${techName(b.technician_id)}`, `Taken by ${techName(b.technician_id)}`) : L("ยังไม่มีช่างรับงาน", "No technician yet")}</div>}
+                                        {isOpen(b) && timePassed(b) && <div className="small" style={{ color: "var(--red)" }}>{L("เลยเวลานัดแล้ว", "Time has passed")}</div>}
+                                    </td>
                                     <td className="right">
                                         <div className="btn-row" style={{ justifyContent: "flex-end" }}>
                                             {b.status === "PENDING" && <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => confirm(b)}>{L("ยืนยัน", "Confirm")}</button>}
                                             {b.status === "CONFIRMED" && <button type="button" className="btn btn-primary btn-sm" onClick={() => { setText(""); setCheckingIn(b); }}>{L("รับเครื่อง", "Check in")}</button>}
-                                            {["PENDING", "CONFIRMED"].includes(b.status) && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setText(""); setCancelling(b); }}>{t("common.cancel")}</button>}
+                                            {isOpen(b) && timePassed(b) && <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setText(""); setNoShow(b); }}>{L("ไม่มาตามนัด", "No-show")}</button>}
+                                            {isOpen(b) && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setText(""); setCancelling(b); }}>{t("common.cancel")}</button>}
                                             {b.work_order_id && <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate(`/admin/work-orders/${b.work_order_id}`)}>{L("ดูใบงาน", "Work order")}</button>}
                                         </div>
                                     </td>
@@ -105,7 +128,25 @@ export default function AdminBookings() {
                         </>
                     )}
                 >
-                    <TextField as="textarea" label={L("เหตุผล (บังคับ)", "Reason (required)")} hint={L("ลูกค้าจะเห็นเหตุผลนี้ ถ้าลูกค้าไม่มาตามนัดให้ระบุที่นี่", "The customer sees this. Use it for no-shows too.")} value={text} onChange={(e) => setText(e.target.value)} />
+                    <TextField as="textarea" label={L("เหตุผล (บังคับ)", "Reason (required)")} hint={L("ลูกค้าจะเห็นเหตุผลนี้ ถ้าลูกค้าไม่มาตามนัด ใช้ปุ่ม “ไม่มาตามนัด” แทน", "The customer sees this. For a no-show use the No-show button instead.")} value={text} onChange={(e) => setText(e.target.value)} />
+                </Modal>
+            )}
+
+            {noShow && (
+                <Modal
+                    title={L(`ลูกค้าไม่มาตามนัด ${noShow.booking_number}`, `No-show ${noShow.booking_number}`)}
+                    onClose={() => setNoShow(null)}
+                    footer={(
+                        <>
+                            <button type="button" className="btn btn-secondary" onClick={() => setNoShow(null)}>{t("common.cancel")}</button>
+                            <button type="button" className="btn btn-danger" disabled={busy} onClick={markNoShow}>{L("บันทึกว่าไม่มาตามนัด", "Record no-show")}</button>
+                        </>
+                    )}
+                >
+                    <div className="stack">
+                        <p className="small muted">{L(`นัด ${fmt.day(noShow.appointment_date)} ${noShow.appointment_time} · ${noShow.customer_name} ระบบจะนับเป็นสถิติของลูกค้าคนนี้ และปิดการจอง`, `Appointment ${fmt.day(noShow.appointment_date)} ${noShow.appointment_time} · ${noShow.customer_name}. This closes the booking and counts against the customer.`)}</p>
+                        <TextField as="textarea" label={L("หมายเหตุ (ไม่บังคับ)", "Note (optional)")} placeholder={L("เช่น โทรแล้วไม่รับสาย", "e.g. called, no answer")} value={text} onChange={(e) => setText(e.target.value)} />
+                    </div>
                 </Modal>
             )}
 
@@ -127,7 +168,12 @@ export default function AdminBookings() {
                             <dt>{L("อาการ", "Symptom")}</dt><dd>{checkingIn.reported_symptom}</dd>
                         </dl>
                         <TextField label={L("อุปกรณ์ที่ลูกค้าฝากไว้", "Accessories left with the device")} placeholder={L("เช่น อะแดปเตอร์ชาร์จ กระเป๋า", "e.g. charger, bag")} value={text} onChange={(e) => setText(e.target.value)} />
-                        <p className="small faint">{L("1 การจองเปิดใบงานได้ 1 ใบ", "One booking opens exactly one work order.")}</p>
+                        <p className="small faint">
+                            {checkingIn.technician_id
+                                ? L(`ใบงานจะไปหา ${techName(checkingIn.technician_id)} ที่รับงานนี้ไว้`, `The work order goes to ${techName(checkingIn.technician_id)}, who took this job.`)
+                                : L("ยังไม่มีช่างรับงานนี้ มอบหมายช่างได้ในหน้าใบงาน", "No technician took this job yet; assign one on the work order.")}
+                            {" · "}{L("1 การจองเปิดใบงานได้ 1 ใบ", "One booking opens exactly one work order.")}
+                        </p>
                     </div>
                 </Modal>
             )}

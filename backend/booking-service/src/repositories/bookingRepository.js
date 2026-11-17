@@ -1,4 +1,4 @@
-const { SLOT_OCCUPYING_STATUSES } = require("../constants");
+const { BOOKING_STATUS, OPEN_STATUSES, SLOT_OCCUPYING_STATUSES } = require("../constants");
 
 const BOOKING_COLUMNS = [
     "booking_id",
@@ -17,6 +17,8 @@ const BOOKING_COLUMNS = [
     "scheduled_at",
     "status",
     "work_order_id",
+    "technician_id",
+    "technician_claimed_at",
     "cancelled_at",
     "cancelled_by",
     "cancellation_reason",
@@ -156,6 +158,56 @@ function createBookingRepository(db) {
                 .where({ booking_id: bookingId, status: fromStatus })
                 .update({ ...changes, updated_at: new Date() });
             return affected === 1;
+        },
+
+        /** Open bookings between [from, to), earliest first: the technicians' queue. */
+        async listOpenBetween(from, to) {
+            const rows = await q(null, "bookings")
+                .select(BOOKING_COLUMNS)
+                .whereIn("status", OPEN_STATUSES)
+                .where("scheduled_at", ">=", from)
+                .where("scheduled_at", "<", to)
+                .orderBy([{ column: "scheduled_at", order: "asc" }, { column: "created_at", order: "asc" }]);
+            return rows.map(toBooking);
+        },
+
+        /**
+         * A technician takes an open booking. Only succeeds while nobody has
+         * taken it yet, so two technicians cannot both get the same job.
+         */
+        async claim(bookingId, technicianId, claimedAt) {
+            const affected = await q(null, "bookings")
+                .where({ booking_id: bookingId })
+                .whereNull("technician_id")
+                .whereIn("status", OPEN_STATUSES)
+                .update({ technician_id: technicianId, technician_claimed_at: claimedAt, updated_at: claimedAt });
+            return affected === 1;
+        },
+
+        /** Give a taken booking back to the queue; `technicianId` limits it to that holder. */
+        async release(bookingId, technicianId = null) {
+            const query = q(null, "bookings")
+                .where({ booking_id: bookingId })
+                .whereIn("status", OPEN_STATUSES);
+            if (technicianId) query.where({ technician_id: technicianId });
+            const affected = await query.update({
+                technician_id: null,
+                technician_claimed_at: null,
+                updated_at: new Date()
+            });
+            return affected === 1;
+        },
+
+        /** customer_id -> number of bookings marked NO_SHOW. */
+        async countNoShows(customerIds) {
+            if (customerIds.length === 0) return new Map();
+            const rows = await q(null, "bookings")
+                .select("customer_id")
+                .count({ total: "*" })
+                .where({ status: BOOKING_STATUS.NO_SHOW })
+                .whereIn("customer_id", customerIds)
+                .groupBy("customer_id");
+            return new Map(rows.map((row) => [row.customer_id, Number(row.total)]));
         }
     };
 }

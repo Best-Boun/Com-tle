@@ -82,13 +82,15 @@ test("admin cannot create bookings; technician has no booking access", async () 
     });
 });
 
-test("full flow: create -> confirm -> check-in (COMPLETED)", async () => {
+test("full flow: create (confirmed) -> check-in (COMPLETED)", async () => {
     await withServer(async (base) => {
         const created = await fetch(base, { method: "POST", headers: headers(C1, ["CUSTOMER"]), body: payload });
-        const { booking_id: id } = (await created.json()).data;
+        const { booking_id: id, status } = (await created.json()).data;
+        assert.equal(status, "CONFIRMED");
 
         assert.equal((await fetch(`${base}/${id}/confirm`, { method: "PATCH", headers: headers(C1, ["CUSTOMER"]) })).status, 403);
-        assert.equal((await fetch(`${base}/${id}/confirm`, { method: "PATCH", headers: headers(A1, ["ADMIN"]) })).status, 200);
+        assert.equal((await fetch(`${base}/${id}/no-show`, { method: "PATCH", headers: headers(C1, ["CUSTOMER"]) })).status, 403);
+        assert.equal((await fetch(`${base}/${id}/no-show`, { method: "PATCH", headers: headers(A1, ["ADMIN"]) })).status, 409);
 
         const checkIn = await fetch(`${base}/${id}/check-in`, { method: "POST", headers: headers(A1, ["ADMIN"]) });
         assert.equal(checkIn.status, 200);
@@ -103,5 +105,25 @@ test("availability route returns configured slots", async () => {
         const res = await fetch(`${base}/availability?date=2026-11-12`, { headers: headers(C1, ["CUSTOMER"]) });
         assert.equal(res.status, 200);
         assert.deepEqual((await res.json()).data.slots.map((s) => s.time), TEST_CONFIG.slotTimes);
+    });
+});
+
+test("technicians see the queue and take a job; customers cannot", async () => {
+    await withServer(async (base) => {
+        const T1 = "bbbbbbbb-0000-4000-8000-000000000001";
+        const created = await fetch(base, { method: "POST", headers: headers(C1, ["CUSTOMER"]), body: payload });
+        const { booking_id: id } = (await created.json()).data;
+
+        assert.equal((await fetch(`${base}/queue`, { headers: headers(C1, ["CUSTOMER"]) })).status, 403);
+        const queue = await fetch(`${base}/queue`, { headers: headers(T1, ["TECHNICIAN"]) });
+        assert.equal(queue.status, 200);
+        assert.deepEqual((await queue.json()).data.map((b) => b.booking_id), [id]);
+        assert.equal((await fetch(`${base}/queue`, { headers: headers(A1, ["ADMIN"]) })).status, 200);
+
+        assert.equal((await fetch(`${base}/${id}/claim`, { method: "POST", headers: headers(C1, ["CUSTOMER"]) })).status, 403);
+        const claim = await fetch(`${base}/${id}/claim`, { method: "POST", headers: headers(T1, ["TECHNICIAN"]) });
+        assert.equal(claim.status, 200);
+        assert.equal((await claim.json()).data.technician_id, T1);
+        assert.equal((await fetch(`${base}/${id}/claim`, { method: "DELETE", headers: headers(A1, ["ADMIN"]) })).status, 200);
     });
 });

@@ -12,7 +12,7 @@ export default function MyBookings() {
     const list = useAsync(() => api.bookings.listMine(), []);
 
     const items = (list.data || []).filter((b) =>
-        tab === "upcoming" ? ["PENDING", "CONFIRMED"].includes(b.status) : ["COMPLETED", "CANCELLED"].includes(b.status)
+        tab === "upcoming" ? ["PENDING", "CONFIRMED"].includes(b.status) : ["COMPLETED", "CANCELLED", "NO_SHOW"].includes(b.status)
     );
     if (tab === "upcoming") items.sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
 
@@ -33,7 +33,7 @@ export default function MyBookings() {
                     title={tab === "upcoming" ? L("ยังไม่มีคิวที่กำลังจะถึง", "No upcoming bookings") : L("ยังไม่มีประวัติการจอง", "No past bookings")}
                     action={tab === "upcoming" && <Link to="/book" className="btn btn-primary">{L("จองคิวซ่อม", "Book a repair")}</Link>}
                 >
-                    {tab === "upcoming" && L("เลือกบริการและเวลาที่สะดวก ร้านจะยืนยันคิวให้", "Pick a service and time — the shop will confirm it.")}
+                    {tab === "upcoming" && L("เลือกบริการและเวลาที่สะดวก ได้คิวทันที", "Pick a service and time — you're booked right away.")}
                 </Empty>
             )}
             <div className="ticket-list">

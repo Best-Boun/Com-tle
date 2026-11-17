@@ -77,6 +77,29 @@ export const bookings = {
         return { ...(await withCustomerName(booking)), status_history: history };
     },
 
+    /** Upcoming open bookings (today + next days) for technicians to take. */
+    async queue({ days = 2 } = {}) {
+        return request(`/bookings/queue${query({ days })}`);
+    },
+
+    /** A technician takes a booking before the device arrives. */
+    async claim(bookingId) {
+        return request(`/bookings/${encodeURIComponent(bookingId)}/claim`, { method: "POST" });
+    },
+
+    /** Give a taken booking back to the queue. */
+    async release(bookingId) {
+        return request(`/bookings/${encodeURIComponent(bookingId)}/claim`, { method: "DELETE" });
+    },
+
+    /** The customer did not come (only after the appointment time). */
+    async markNoShow(bookingId, reason) {
+        return withCustomerName(await request(`/bookings/${encodeURIComponent(bookingId)}/no-show`, {
+            method: "PATCH",
+            body: { reason: reason?.trim() || null }
+        }));
+    },
+
     async confirm(bookingId) {
         return withCustomerName(await request(`/bookings/${encodeURIComponent(bookingId)}/confirm`, { method: "PATCH" }));
     },
@@ -104,19 +127,21 @@ export const bookings = {
     /** Booking numbers for the admin dashboard (replaces the demo figures). */
     async dashboardFigures() {
         const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
-        const [todays, pending, all] = await Promise.all([
+        const [todays, all] = await Promise.all([
             request(`/bookings${query({ date: today, limit: 100 })}`),
-            request(`/bookings${query({ status: "PENDING", limit: 100 })}`),
             request(`/bookings${query({ limit: 100 })}`)
         ]);
         const now = Date.now();
+        const open = (b) => ["PENDING", "CONFIRMED"].includes(b.status);
         const upcoming = all
             .filter((b) => ["PENDING", "CONFIRMED"].includes(b.status) && new Date(b.scheduled_at).getTime() > now)
             .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at))
             .slice(0, 6);
         return {
-            bookings_today: todays.filter((b) => b.status !== "CANCELLED").length,
-            bookings_to_confirm: pending.length,
+            bookings_today: todays.filter((b) => !["CANCELLED", "NO_SHOW"].includes(b.status)).length,
+            // Bookings are confirmed automatically; what needs the shop now is an
+            // appointment whose time passed with no device checked in.
+            bookings_overdue: all.filter((b) => open(b) && new Date(b.scheduled_at).getTime() <= now).length,
             upcoming: await withNames(upcoming)
         };
     }
