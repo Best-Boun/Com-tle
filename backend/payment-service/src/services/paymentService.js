@@ -612,6 +612,19 @@ function createPaymentService({
         return row ? { ...row, amount: toAmount(row.amount) } : null;
     }
 
+    // payment_audit_logs / outbox_events must name exactly one payment or
+    // refund, so deposits keep their own trail (deposit_audit_logs).
+    async function depositAudit(trx, { depositId, actor, action, metadata }) {
+        await trx("deposit_audit_logs").insert({
+            audit_id: createId(),
+            deposit_id: depositId,
+            actor_user_id: actor,
+            action,
+            metadata: JSON.stringify(metadata),
+            created_at: new Date(now())
+        });
+    }
+
     async function fetchBooking(bookingId, authorization) {
         if (typeof loadBooking !== "function") {
             throw new AppError("Booking Service is unavailable", 503);
@@ -691,13 +704,12 @@ function createPaymentService({
                 }
                 throw error;
             }
-            await audit(trx, {
-                actor, action: "deposit.paid",
-                metadata: { deposit_id: row.deposit_id, booking_id: row.booking_id, amount: row.amount }
-            });
-            await outbox(trx, {
-                type: "deposit.paid",
-                payload: { deposit_id: row.deposit_id, booking_id: row.booking_id, amount: row.amount, currency: CURRENCY }
+            await depositAudit(trx, {
+                depositId: row.deposit_id, actor, action: "deposit.paid",
+                metadata: {
+                    booking_id: row.booking_id, amount: row.amount, currency: CURRENCY,
+                    payment_method: row.payment_method, reference_number: row.reference_number
+                }
             });
             return { resource_type: "deposit", resource_id: row.deposit_id, body: depositView(row) };
         }), "Deposit payment unavailable");
@@ -760,13 +772,15 @@ function createPaymentService({
             const settledAt = new Date(now());
             const changes = { ...target, settled_at: settledAt, updated_at: settledAt };
             await trx("deposits").where({ deposit_id: row.deposit_id }).update(changes);
-            const action = `deposit.${target.status.toLowerCase()}`;
-            const metadata = {
-                deposit_id: row.deposit_id, booking_id: row.booking_id, amount: toAmount(row.amount),
-                booking_status: booking.status, work_order_id: target.work_order_id || null
-            };
-            await audit(trx, { actor, action, metadata });
-            await outbox(trx, { type: action, payload: { ...metadata, currency: row.currency } });
+            await depositAudit(trx, {
+                depositId: row.deposit_id,
+                actor,
+                action: `deposit.${target.status.toLowerCase()}`,
+                metadata: {
+                    booking_id: row.booking_id, amount: toAmount(row.amount), currency: row.currency,
+                    booking_status: booking.status, work_order_id: target.work_order_id || null
+                }
+            });
             const { updated_at: _updatedAt, ...shown } = changes;
             return depositView({ ...row, ...shown });
         }), "Deposit settlement unavailable");
