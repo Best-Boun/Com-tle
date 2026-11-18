@@ -39,8 +39,22 @@ Routes are mounted at the service root; the API Gateway exposes them under
   repair, record repair results, and record a test at
   `/work-orders/:workOrderId/...`. Each operation checks the active assignment
   and current status in a transaction.
-- Quotation operations — ADMIN prices/sends a draft or creates a new revision;
-  the owner approves/rejects online, and ADMIN records walk-in decisions.
+- `POST /work-orders/:workOrderId/quotations` — the assigned technician sends
+  1-5 priced options. The system adds one more: "no repair" at
+  `NO_REPAIR_FEE` (default 300 THB) on the initial quotation, or "skip the
+  extra work" at 0 THB on an additional one.
+- `POST /quotations/:quotationId/decision` `{ option_id, note? }` — the owner
+  chooses online; ADMIN records the choice of a walk-in customer. The chosen
+  option's items become the APPROVED quotation's items. "No repair" sends the
+  device straight to pick-up (`repair_declined: true`, no test needed).
+- `POST /work-orders/:workOrderId/parts/wait` `{ note }` — technician marks an
+  approved or in-repair job as waiting for parts; `repair/start` resumes it.
+- `POST /work-orders/:workOrderId/bill` — ADMIN: Repair-Service works out the
+  approved total and registers the bill with Payment-Service (handover does
+  this too). Needs `USER_SERVICE_URL` to find a registered customer's
+  `customer_id`.
+- Work orders ready for pick-up carry `pickup` (free until `ready_at` +
+  `FREE_STORAGE_DAYS`, default 7, then `overdue`).
 - `POST /work-orders/:workOrderId/handover` — ADMIN hands over a tested device.
   Repair-Service checks the live Payment-Service balance using the caller's
   authorization token; an outstanding amount requires an exception reason.
@@ -55,4 +69,4 @@ Repair-Service database (`repair_parts_inventory` and
 `repair_stock_movements`) so parts can be used without demo data. Payments stay
 in Payment-Service. The frontend registers or updates a bill from approved
 quotations before recording payment or handover; handover independently
-verifies the balance server-side.
+verifies the balance server-side.

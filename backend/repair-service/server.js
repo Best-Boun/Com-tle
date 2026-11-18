@@ -5,6 +5,7 @@ const db = require("./src/config/database");
 const { createApp } = require("./src/app");
 const { createWorkOrderRepository } = require("./src/repositories/workOrderRepository");
 const { createWorkOrderService } = require("./src/services/workOrderService");
+const { loadWorkflowConfig } = require("./src/config/workflowConfig");
 const {
     loadServiceJwtConfig,
     createAuthenticate
@@ -16,40 +17,107 @@ const jwtConfig = loadServiceJwtConfig(process.env, { baseDir: __dirname });
 const paymentServiceUrl = (process.env.PAYMENT_SERVICE_URL || "http://localhost:3006")
     .replace(/\/$/, "");
 
-async function getPaymentBalance(workOrderId, authorization) {
+const userServiceUrl = (process.env.USER_SERVICE_URL || "http://localhost:3001")
+    .replace(/\/$/, "");
+
+// Calls another service with the caller's own token, so that service still
+// checks the caller's permissions. Returns { status, data }.
+async function callService(url, authorization, { method = "GET", body } = {}) {
     if (!authorization) {
         throw new AppError("Authentication required", 401);
     }
-
     let response;
     try {
-        response = await fetch(
-            `${paymentServiceUrl}/balances/${encodeURIComponent(workOrderId)}`,
-            {
-                headers: { authorization, accept: "application/json" },
-                signal: AbortSignal.timeout(3000)
-            }
-        );
+        response = await fetch(url, {
+            method,
+            headers: {
+                authorization,
+                accept: "application/json",
+                ...(body ? { "content-type": "application/json" } : {})
+            },
+            body: body ? JSON.stringify(body) : undefined,
+            signal: AbortSignal.timeout(3000)
+        });
     } catch (error) {
-        const unavailable = new AppError("Payment Service is unavailable", 503);
+        const unavailable = new AppError(`${new URL(url).host} is unavailable`, 503);
         unavailable.cause = error;
         throw unavailable;
     }
     const payload = await response.json().catch(() => null);
-    if (!response.ok || payload?.success === false) {
-        const message = payload?.message || "Payment balance could not be verified";
-        throw new AppError(
-            response.status === 404 ? "No issued bill for this work order" : message,
-            response.status === 404 ? 409 : response.status >= 500 ? 503 : response.status
-        );
+    return { response, payload, data: payload?.data };
+}
+
+function serviceError(response, payload, fallback) {
+    return new AppError(
+        payload?.message || fallback,
+        response.status >= 500 ? 503 : response.status
+    );
+}
+
+async function getPaymentBalance(workOrderId, authorization) {
+    const { response, payload, data } = await callService(
+        `${paymentServiceUrl}/balances/${encodeURIComponent(workOrderId)}`,
+        authorization
+    );
+    if (response.status === 404) {
+        throw new AppError("No issued bill for this work order", 409);
     }
-    return payload?.data;
+    if (!response.ok || payload?.success === false) {
+        throw serviceError(response, payload, "Payment balance could not be verified");
+    }
+    return data;
+}
+
+const payment = {
+    async getBalance(workOrderId, authorization) {
+        const { response, payload, data } = await callService(
+            `${paymentServiceUrl}/balances/${encodeURIComponent(workOrderId)}`,
+            authorization
+        );
+        if (response.status === 404) {
+            return null;
+        }
+        if (!response.ok || payload?.success === false) {
+            throw serviceError(response, payload, "Payment balance could not be verified");
+        }
+        return data;
+    },
+    async registerBill(bill, authorization) {
+        const { response, payload, data } = await callService(
+            `${paymentServiceUrl}/bills`,
+            authorization,
+            { method: "POST", body: bill }
+        );
+        if (!response.ok || payload?.success === false) {
+            throw serviceError(response, payload, "The bill could not be registered");
+        }
+        return data;
+    }
+};
+
+// Work orders from a registered customer carry their user_id; the bill must
+// name their User-Service customer_id.
+async function resolveCustomerId(userId, authorization) {
+    const { response, payload, data } = await callService(
+        `${userServiceUrl}/admin/users/${encodeURIComponent(userId)}`,
+        authorization
+    );
+    if (!response.ok || payload?.success === false) {
+        throw serviceError(response, payload, "Unable to resolve the registered customer for billing");
+    }
+    if (!data?.customer?.customer_id) {
+        throw new AppError("Unable to resolve the registered customer for billing", 502);
+    }
+    return data.customer.customer_id;
 }
 
 const app = createApp({
     workOrderService: createWorkOrderService({
         workOrderRepository: createWorkOrderRepository(db),
-        getPaymentBalance
+        getPaymentBalance,
+        payment,
+        resolveCustomerId,
+        rules: loadWorkflowConfig()
     }),
     authenticate: createAuthenticate({ jwt, ...jwtConfig }),
     healthCheck: () => db.raw("SELECT 1")

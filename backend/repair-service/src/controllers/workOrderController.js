@@ -58,30 +58,13 @@ function createWorkOrderController(workOrderService) {
             res.status(200).json(successResponse("Diagnosis saved", workOrder));
         }),
 
-        proposeItems: handle(async (req, res) => {
-            const workOrder = await workOrderService.proposeItems(
+        proposeQuotation: handle(async (req, res) => {
+            const workOrder = await workOrderService.proposeQuotation(
                 req.params.workOrderId,
                 req.body,
                 req.user
             );
-            res.status(201).json(successResponse("Repair items proposed", workOrder));
-        }),
-
-        priceAndSend: handle(async (req, res) => {
-            const workOrder = await workOrderService.priceAndSend(
-                req.params.quotationId,
-                req.body,
-                req.user
-            );
-            res.status(200).json(successResponse("Quotation sent", workOrder));
-        }),
-
-        reviseQuotation: handle(async (req, res) => {
-            const workOrder = await workOrderService.reviseQuotation(
-                req.params.quotationId,
-                req.user
-            );
-            res.status(201).json(successResponse("Quotation revision created", workOrder));
+            res.status(201).json(successResponse("Quotation sent to the customer", workOrder));
         }),
 
         decideQuotation: handle(async (req, res) => {
@@ -99,6 +82,24 @@ function createWorkOrderController(workOrderService) {
                 req.user
             );
             res.status(200).json(successResponse("Repair started", workOrder));
+        }),
+
+        waitForParts: handle(async (req, res) => {
+            const workOrder = await workOrderService.waitForParts(
+                req.params.workOrderId,
+                req.body,
+                req.user
+            );
+            res.status(200).json(successResponse("Waiting for parts", workOrder));
+        }),
+
+        syncBill: handle(async (req, res) => {
+            const balance = await workOrderService.syncBill(
+                req.params.workOrderId,
+                req.user,
+                req.get("authorization")
+            );
+            res.status(200).json(successResponse("Bill is up to date", balance));
         }),
 
         recordResult: handle(async (req, res) => {
@@ -185,4 +186,4 @@ function createWorkOrderController(workOrderService) {
 
 module.exports = {
     createWorkOrderController
-};
+};

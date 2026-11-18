@@ -46,24 +46,11 @@ export const repairs = {
         });
     },
 
-    proposeItems(workOrderId, input) {
+    /** Technician sends priced options; the server adds the "no repair" option. */
+    proposeQuotation(workOrderId, input) {
         return request(`${ROOT}/${encodeURIComponent(workOrderId)}/quotations`, {
             method: "POST",
             body: input
-        });
-    },
-
-    priceAndSend(quotationId, input) {
-        return request(`${quotePath(quotationId)}/send`, {
-            method: "PUT",
-            body: input
-        });
-    },
-
-    reviseQuotation(quotationId) {
-        return request(`${quotePath(quotationId)}/revise`, {
-            method: "POST",
-            body: {}
         });
     },
 
@@ -76,6 +63,21 @@ export const repairs = {
 
     startRepair(workOrderId) {
         return request(`${ROOT}/${encodeURIComponent(workOrderId)}/repair/start`, {
+            method: "POST",
+            body: {}
+        });
+    },
+
+    waitForParts(workOrderId, note) {
+        return request(`${ROOT}/${encodeURIComponent(workOrderId)}/parts/wait`, {
+            method: "POST",
+            body: { note }
+        });
+    },
+
+    /** Repair-Service registers the bill with Payment-Service from the approved quotations. */
+    syncBill(workOrderId) {
+        return request(`${ROOT}/${encodeURIComponent(workOrderId)}/bill`, {
             method: "POST",
             body: {}
         });
@@ -136,4 +138,4 @@ export const inventory = {
             body: input
         });
     }
-};
+};

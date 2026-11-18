@@ -107,45 +107,12 @@ async function displayName(userId) {
     return nameCache.get(userId);
 }
 
-// The bill must name the real User-Service customer_id. Work orders made from a
-// booking carry the customer's user_id; an admin can resolve it to customer_id.
-async function customerIdFor(wo) {
-    if (wo.source === "WALK_IN") {
-        return wo.customer_id;
-    }
-    const user = await request(`/users/admin/users/${wo.customer_id}`);
-    if (!user?.customer?.customer_id) {
-        throw fail(
-            "ไม่สามารถยืนยันบัญชีลูกค้าสำหรับออกบิลได้",
-            "Unable to resolve the registered customer for billing",
-            502
-        );
-    }
-    return user.customer.customer_id;
-}
-
+// Repair-Service works out the bill from the approved quotations and registers
+// it with Payment-Service; the browser never sends the amount.
 async function ensureBill(woId) {
-    const wo = await workOrder(woId);
-    if (!wo) throw fail("ไม่พบใบงาน", "Work order not found", 404);
-    const total = approvedTotal(wo);
-    if (total <= 0) throw fail("ยังไม่มีใบเสนอราคาที่อนุมัติ", "There is no approved quotation yet", 409);
-
-    let current = null;
-    try {
-        current = await request(`/payments/balances/${woId}`);
-    } catch (error) {
-        if (error.status !== 404) throw error;
-    }
-    if (current && Number(current.bill_total) === total) return current;
-    return request("/payments/bills", {
+    return request(`/repairs/work-orders/${encodeURIComponent(woId)}/bill`, {
         method: "POST",
-        body: {
-            work_order_id: woId,
-            bill_id: woId,
-            bill_version: (current?.bill_version || 0) + 1,
-            customer_id: await customerIdFor(wo),
-            total_amount: total
-        }
+        body: {}
     });
 }
 

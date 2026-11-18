@@ -26,6 +26,8 @@ function workOrderQuery(db) {
             "wo.handed_over_at",
             "wo.intake_terms_acknowledged_at",
             "wo.handover_terms_acknowledged_at",
+            "wo.repair_declined",
+            "wo.ready_at",
             "wo.received_at",
             "wo.created_at",
             "wo.updated_at",
@@ -72,11 +74,25 @@ function presentRow(row) {
     return {
         ...workOrder,
         accessories: accessoriesText(accessoriesReceived),
+        repair_declined: Boolean(workOrder.repair_declined),
+        ready_at: workOrder.ready_at || null,
         created_at: workOrder.received_at || workOrder.created_at,
         technician_id: workOrder.technician_id || null,
         work_order_number: workOrder.work_order_number
             || `WO-${workOrder.work_order_id.replace(/-/g, "").slice(0, 10).toUpperCase()}`,
         source: workOrder.source || (workOrder.booking_id ? "BOOKING" : "WALK_IN")
+    };
+}
+
+function presentOptionItem(item) {
+    return {
+        item_id: item.option_item_id,
+        type: item.item_type,
+        description: item.description,
+        part_id: item.part_id || null,
+        qty: Number(item.quantity),
+        unit_price: Number(item.unit_price),
+        subtotal: Number(item.subtotal)
     };
 }
 
@@ -140,14 +156,38 @@ async function loadWorkOrderDetails(db, workOrderId) {
     ]);
 
     const quotationIds = quotations.map((quotation) => quotation.quotation_id);
-    const [items, approvals] = quotationIds.length === 0
-        ? [[], []]
+    const [items, approvals, options] = quotationIds.length === 0
+        ? [[], [], []]
         : await Promise.all([
             db("quotation_items")
                 .whereIn("quotation_id", quotationIds)
                 .orderBy("quotation_item_id", "asc"),
-            db("quotation_approval_records").whereIn("quotation_id", quotationIds)
+            db("quotation_approval_records").whereIn("quotation_id", quotationIds),
+            db("quotation_options")
+                .whereIn("quotation_id", quotationIds)
+                .orderBy("sort_order", "asc")
         ]);
+    const optionIds = options.map((option) => option.option_id);
+    const optionItems = optionIds.length === 0
+        ? []
+        : await db("quotation_option_items")
+            .whereIn("option_id", optionIds)
+            .orderBy("sort_order", "asc");
+    const itemsByOption = new Map(optionIds.map((id) => [id, []]));
+    for (const item of optionItems) {
+        itemsByOption.get(item.option_id).push(presentOptionItem(item));
+    }
+    const optionsByQuotation = new Map(quotationIds.map((id) => [id, []]));
+    for (const option of options) {
+        optionsByQuotation.get(option.quotation_id).push({
+            option_id: option.option_id,
+            kind: option.option_kind,
+            title: option.title,
+            description: option.description,
+            total: Number(option.total_amount),
+            items: itemsByOption.get(option.option_id)
+        });
+    }
     const itemsByQuotation = new Map(quotationIds.map((id) => [id, []]));
     for (const item of items) {
         itemsByQuotation.get(item.quotation_id).push({
@@ -171,6 +211,8 @@ async function loadWorkOrderDetails(db, workOrderId) {
             revision: quotation.revision_number,
             kind: quotation.quotation_kind,
             status: quotation.status,
+            options: optionsByQuotation.get(quotation.quotation_id),
+            selected_option_id: quotation.selected_option_id || null,
             items: itemsByQuotation.get(quotation.quotation_id),
             total: Number(quotation.total_amount),
             note: quotation.note,
@@ -337,9 +379,10 @@ function createWorkOrderRepository(db) {
 
     async function recordStatusChange(trx, workOrder, actorId, nextStatus, reason, changes = {}) {
         const changedAt = new Date();
+        const readyAt = nextStatus === "RETURN_PENDING" ? { ready_at: changedAt } : {};
         await trx("work_orders")
             .where({ work_order_id: workOrder.work_order_id })
-            .update({ ...changes, status: nextStatus, updated_at: changedAt });
+            .update({ ...changes, ...readyAt, status: nextStatus, updated_at: changedAt });
         await trx("work_order_status_history").insert({
             history_id: randomUUID(),
             work_order_id: workOrder.work_order_id,
@@ -558,13 +601,17 @@ function createWorkOrderRepository(db) {
             });
         },
 
-        async proposeItems(workOrderId, technicianId, quotation, items) {
+        // The technician sends priced options straight to the customer. The
+        // system adds one more option itself, so a customer can always say no:
+        //   INITIAL     "no repair" = the inspection fee, device goes back
+        //   ADDITIONAL  "skip the extra work" = 0 THB, the approved repair goes on
+        async proposeQuotation(workOrderId, technicianId, quotation, rules) {
             return db.transaction(async (trx) => {
                 const result = await assignedOrder(
                     trx,
                     workOrderId,
                     technicianId,
-                    ["DIAGNOSING", "APPROVED", "IN_REPAIR"]
+                    ["DIAGNOSING", "APPROVED", "WAITING_PARTS", "IN_REPAIR"]
                 );
                 if (!result.workOrder) {
                     return result;
@@ -585,157 +632,100 @@ function createWorkOrderRepository(db) {
                     .where({ work_order_id: workOrderId })
                     .max({ revision_number: "revision_number" })
                     .first();
-                const createdAt = new Date();
+                const sentAt = new Date();
                 const quotationId = randomUUID();
+                const revision = Number(latest.revision_number || 0) + 1;
                 await trx("quotations").insert({
                     quotation_id: quotationId,
                     work_order_id: workOrderId,
-                    revision_number: Number(latest.revision_number || 0) + 1,
+                    revision_number: revision,
                     quotation_kind: kind,
-                    status: "DRAFT",
+                    status: "SENT",
                     total_amount: 0,
                     currency: "THB",
                     created_by_user_id: technicianId,
                     note: quotation.note || null,
-                    created_at: createdAt,
-                    updated_at: createdAt
+                    sent_at: sentAt,
+                    created_at: sentAt,
+                    updated_at: sentAt
                 });
-                await trx("quotation_items").insert(items.map((item) => ({
-                    quotation_item_id: randomUUID(),
-                    quotation_id: quotationId,
-                    work_order_id: workOrderId,
-                    item_type: item.type,
-                    description: item.description,
-                    part_id: item.part_id || null,
-                    quantity: item.qty,
-                    unit_price: 0,
-                    subtotal: 0
-                })));
-                await trx("work_orders").where({ work_order_id: workOrderId }).update({
-                    updated_at: createdAt
-                });
+
+                const fee = rules.noRepairFee;
+                const options = [
+                    ...quotation.options.map((option) => ({ ...option, kind: "REPAIR" })),
+                    kind === "INITIAL"
+                        ? {
+                            kind: "NO_REPAIR",
+                            title: "ไม่ซ่อม รับเครื่องคืน",
+                            description: `ตรวจเช็กฟรีเมื่อซ่อม หากไม่ซ่อมคิดค่าตรวจเช็ก ${fee} บาท`,
+                            items: [{
+                                type: "LABOR",
+                                description: "ค่าตรวจเช็ก (ไม่ซ่อม)",
+                                part_id: null,
+                                qty: 1,
+                                unit_price: fee
+                            }]
+                        }
+                        : {
+                            kind: "SKIP_EXTRA",
+                            title: "ไม่ทำงานเพิ่ม",
+                            description: "ซ่อมต่อตามที่อนุมัติไว้เดิม ไม่มีค่าใช้จ่ายเพิ่ม",
+                            items: []
+                        }
+                ];
+                for (const [index, option] of options.entries()) {
+                    const optionId = randomUUID();
+                    const total = option.items.reduce(
+                        (sum, item) => sum + item.qty * item.unit_price,
+                        0
+                    );
+                    await trx("quotation_options").insert({
+                        option_id: optionId,
+                        quotation_id: quotationId,
+                        work_order_id: workOrderId,
+                        sort_order: index + 1,
+                        option_kind: option.kind,
+                        title: option.title,
+                        description: option.description || null,
+                        total_amount: total,
+                        created_at: sentAt
+                    });
+                    if (option.items.length > 0) {
+                        await trx("quotation_option_items").insert(option.items.map((item, itemIndex) => ({
+                            option_item_id: randomUUID(),
+                            option_id: optionId,
+                            sort_order: itemIndex + 1,
+                            item_type: item.type,
+                            description: item.description,
+                            part_id: item.type === "PART" ? item.part_id || null : null,
+                            quantity: item.qty,
+                            unit_price: item.unit_price,
+                            subtotal: item.qty * item.unit_price
+                        })));
+                    }
+                }
+
+                if (kind === "INITIAL") {
+                    await recordStatusChange(
+                        trx,
+                        result.workOrder,
+                        technicianId,
+                        "WAITING_APPROVAL",
+                        `Quotation Rev.${revision} sent with ${options.length} options`
+                    );
+                } else {
+                    await trx("work_orders").where({ work_order_id: workOrderId }).update({
+                        updated_at: sentAt
+                    });
+                }
                 return { workOrder: await loadWorkOrderDetails(trx, workOrderId) };
             });
         },
 
-        async priceAndSend(quotationId, actorId, items, note) {
-            return db.transaction(async (trx) => {
-                const locked = await lockQuotationAndWorkOrder(trx, quotationId);
-                if (locked.notFound) return locked;
-                const { quotation, workOrder } = locked;
-                if (quotation.status !== "DRAFT") {
-                    return { conflict: true, status: workOrder.status };
-                }
-                if ((quotation.quotation_kind === "INITIAL" && workOrder.status !== "DIAGNOSING")
-                    || (quotation.quotation_kind === "ADDITIONAL"
-                        && !["APPROVED", "IN_REPAIR", "TESTING"].includes(workOrder.status))) {
-                    return { conflict: true, status: workOrder.status };
-                }
-                const total = items.reduce((sum, item) => sum + item.qty * item.unit_price, 0);
-                const sentAt = new Date();
-                await trx("quotation_items")
-                    .where({ quotation_id: quotationId })
-                    .del();
-                await trx("quotation_items").insert(items.map((item) => ({
-                    quotation_item_id: randomUUID(),
-                    quotation_id: quotationId,
-                    work_order_id: workOrder.work_order_id,
-                    item_type: item.type,
-                    description: item.description,
-                    part_id: item.part_id || null,
-                    quantity: item.qty,
-                    unit_price: item.unit_price,
-                    subtotal: item.qty * item.unit_price
-                })));
-                await trx("quotations").where({ quotation_id: quotationId }).update({
-                    status: "SENT",
-                    total_amount: total,
-                    note: note || quotation.note,
-                    sent_at: sentAt,
-                    updated_at: sentAt
-                });
-                if (quotation.quotation_kind === "INITIAL") {
-                    await recordStatusChange(
-                        trx,
-                        workOrder,
-                        actorId,
-                        "WAITING_APPROVAL",
-                        `Quotation Rev.${quotation.revision_number} sent`
-                    );
-                } else {
-                    await trx("work_orders").where({ work_order_id: workOrder.work_order_id }).update({
-                        updated_at: sentAt
-                    });
-                }
-                return { workOrder: await loadWorkOrderDetails(trx, workOrder.work_order_id) };
-            });
-        },
-
-        async reviseQuotation(quotationId, actorId) {
-            return db.transaction(async (trx) => {
-                const locked = await lockQuotationAndWorkOrder(trx, quotationId);
-                if (locked.notFound) return locked;
-                const { quotation, workOrder } = locked;
-                if (quotation.status !== "REJECTED") {
-                    return { conflict: true };
-                }
-                if ((quotation.quotation_kind === "INITIAL" && workOrder.status !== "DIAGNOSING")
-                    || (quotation.quotation_kind === "ADDITIONAL"
-                        && !["APPROVED", "IN_REPAIR", "TESTING"].includes(workOrder.status))) {
-                    return { conflict: true, status: workOrder.status };
-                }
-                const pending = await trx("quotations")
-                    .where({
-                        work_order_id: quotation.work_order_id,
-                        quotation_kind: quotation.quotation_kind
-                    })
-                    .whereIn("status", ["DRAFT", "SENT"])
-                    .first();
-                if (pending) {
-                    return { conflict: true };
-                }
-                const previousItems = await trx("quotation_items")
-                    .where({ quotation_id: quotationId });
-                const latest = await trx("quotations")
-                    .where({ work_order_id: quotation.work_order_id })
-                    .max({ revision_number: "revision_number" })
-                    .first();
-                const createdAt = new Date();
-                const newQuotationId = randomUUID();
-                await trx("quotations").insert({
-                    quotation_id: newQuotationId,
-                    work_order_id: quotation.work_order_id,
-                    revision_number: Number(latest.revision_number || 0) + 1,
-                    quotation_kind: quotation.quotation_kind,
-                    status: "DRAFT",
-                    total_amount: 0,
-                    currency: quotation.currency,
-                    created_by_user_id: actorId,
-                    note: quotation.note,
-                    created_at: createdAt,
-                    updated_at: createdAt
-                });
-                if (previousItems.length > 0) {
-                    await trx("quotation_items").insert(previousItems.map((item) => ({
-                        quotation_item_id: randomUUID(),
-                        quotation_id: newQuotationId,
-                        work_order_id: item.work_order_id,
-                        item_type: item.item_type,
-                        description: item.description,
-                        part_id: item.part_id,
-                        quantity: item.quantity,
-                        unit_price: item.unit_price,
-                        subtotal: item.subtotal
-                    })));
-                }
-                await trx("work_orders")
-                    .where({ work_order_id: quotation.work_order_id })
-                    .update({ updated_at: createdAt });
-                return { workOrder: await loadWorkOrderDetails(trx, quotation.work_order_id) };
-            });
-        },
-
-        async decideQuotation(quotationId, user, approve, note) {
+        // The customer (or the shop, for a walk-in) chooses one option. The
+        // chosen option's items become the quotation's items, so parts
+        // allowance and billing keep reading APPROVED quotations as before.
+        async decideQuotation(quotationId, user, optionId, note) {
             return db.transaction(async (trx) => {
                 const locked = await lockQuotationAndWorkOrder(trx, quotationId);
                 if (locked.notFound) return locked;
@@ -751,10 +741,18 @@ function createWorkOrderRepository(db) {
                 }
                 if ((quotation.quotation_kind === "INITIAL" && workOrder.status !== "WAITING_APPROVAL")
                     || (quotation.quotation_kind === "ADDITIONAL"
-                        && !["APPROVED", "IN_REPAIR", "TESTING"].includes(workOrder.status))) {
+                        && !["APPROVED", "WAITING_PARTS", "IN_REPAIR", "TESTING"].includes(workOrder.status))) {
                     return { conflict: true, status: workOrder.status };
                 }
-                const decision = approve ? "APPROVED" : "REJECTED";
+                const option = await trx("quotation_options")
+                    .where({ option_id: optionId, quotation_id: quotationId })
+                    .first();
+                if (!option) {
+                    return { optionNotFound: true };
+                }
+
+                const skipped = option.option_kind === "SKIP_EXTRA";
+                const decision = skipped ? "REJECTED" : "APPROVED";
                 const decidedAt = new Date();
                 await trx("quotation_approval_records").insert({
                     approval_id: randomUUID(),
@@ -763,34 +761,72 @@ function createWorkOrderRepository(db) {
                     approved_by_customer_id: user.userId,
                     approval_method: isCustomer ? "ONLINE" : "IN_PERSON",
                     evidence_reference: null,
-                    rejection_reason: approve ? null : (note || "Customer declined the quotation"),
+                    rejection_reason: skipped ? (note || "Customer skipped the additional work") : null,
                     decided_at: decidedAt
                 });
+                if (!skipped) {
+                    const chosenItems = await trx("quotation_option_items")
+                        .where({ option_id: optionId })
+                        .orderBy("sort_order", "asc");
+                    if (chosenItems.length > 0) {
+                        await trx("quotation_items").insert(chosenItems.map((item) => ({
+                            quotation_item_id: randomUUID(),
+                            quotation_id: quotationId,
+                            work_order_id: workOrder.work_order_id,
+                            item_type: item.item_type,
+                            description: item.description,
+                            part_id: item.part_id,
+                            quantity: item.quantity,
+                            unit_price: item.unit_price,
+                            subtotal: item.subtotal
+                        })));
+                    }
+                }
                 await trx("quotations").where({ quotation_id: quotationId }).update({
                     status: decision,
+                    selected_option_id: optionId,
+                    total_amount: skipped ? 0 : option.total_amount,
                     updated_at: decidedAt
                 });
-                let updatedWorkOrder = workOrder;
+
+                const chose = `Option ${option.sort_order} "${option.title}" chosen on Rev.${quotation.revision_number}`;
+                const reason = note ? `${chose}: ${note}` : chose;
                 if (quotation.quotation_kind === "INITIAL") {
-                    updatedWorkOrder = await recordStatusChange(
+                    const declined = option.option_kind === "NO_REPAIR";
+                    await recordStatusChange(
                         trx,
                         workOrder,
                         user.userId,
-                        approve ? "APPROVED" : "DIAGNOSING",
-                        note || `${decision} quotation Rev.${quotation.revision_number}`
+                        declined ? "RETURN_PENDING" : "APPROVED",
+                        reason,
+                        declined ? { repair_declined: true } : {}
                     );
                 } else {
                     await trx("work_orders").where({ work_order_id: workOrder.work_order_id }).update({
                         updated_at: decidedAt
                     });
+                    await trx("work_order_status_history").insert({
+                        history_id: randomUUID(),
+                        work_order_id: workOrder.work_order_id,
+                        old_status: workOrder.status,
+                        new_status: workOrder.status,
+                        changed_by_user_id: user.userId,
+                        reason,
+                        created_at: decidedAt
+                    });
                 }
-                return { workOrder: await loadWorkOrderDetails(trx, updatedWorkOrder.work_order_id) };
+                return { workOrder: await loadWorkOrderDetails(trx, workOrder.work_order_id) };
             });
         },
 
         async startRepair(workOrderId, technicianId) {
             return db.transaction(async (trx) => {
-                const result = await assignedOrder(trx, workOrderId, technicianId, ["APPROVED"]);
+                const result = await assignedOrder(
+                    trx,
+                    workOrderId,
+                    technicianId,
+                    ["APPROVED", "WAITING_PARTS"]
+                );
                 if (!result.workOrder) {
                     return result;
                 }
@@ -800,7 +836,32 @@ function createWorkOrderRepository(db) {
                         result.workOrder,
                         technicianId,
                         "IN_REPAIR",
-                        "Repair started"
+                        result.workOrder.status === "WAITING_PARTS"
+                            ? "Parts arrived; repair started"
+                            : "Repair started"
+                    )
+                };
+            });
+        },
+
+        async markWaitingParts(workOrderId, technicianId, note) {
+            return db.transaction(async (trx) => {
+                const result = await assignedOrder(
+                    trx,
+                    workOrderId,
+                    technicianId,
+                    ["APPROVED", "IN_REPAIR"]
+                );
+                if (!result.workOrder) {
+                    return result;
+                }
+                return {
+                    workOrder: await recordStatusChange(
+                        trx,
+                        result.workOrder,
+                        technicianId,
+                        "WAITING_PARTS",
+                        note
                     )
                 };
             });
@@ -879,11 +940,14 @@ function createWorkOrderRepository(db) {
                     .first()) {
                     return { pendingQuotation: true };
                 }
-                const testResult = await trx("test_results")
+                // A device the customer chose not to repair was never repaired,
+                // so there is nothing to test before it goes back.
+                const declined = Boolean(workOrder.repair_declined);
+                const testResult = declined ? null : await trx("test_results")
                     .where({ work_order_id: workOrderId, result: "PASS" })
                     .orderBy("tested_at", "desc")
                     .first();
-                if (!testResult) {
+                if (!declined && !testResult) {
                     return { missingTest: true };
                 }
                 const handedOverAt = new Date();
@@ -902,7 +966,7 @@ function createWorkOrderRepository(db) {
                 });
                 await trx("work_orders").where({ work_order_id: workOrderId }).update({
                     status: "HANDED_OVER",
-                    close_reason: "REPAIRED",
+                    close_reason: declined ? "REJECTED" : "REPAIRED",
                     handed_over_at: handedOverAt,
                     handover_terms_acknowledged_at: handedOverAt,
                     updated_at: handedOverAt
@@ -1078,7 +1142,7 @@ function createWorkOrderRepository(db) {
                 if (!workOrder) {
                     return { notFound: true };
                 }
-                if (!["APPROVED", "IN_REPAIR", "TESTING"].includes(workOrder.status)) {
+                if (!["APPROVED", "WAITING_PARTS", "IN_REPAIR", "TESTING"].includes(workOrder.status)) {
                     return { conflict: true, status: workOrder.status };
                 }
                 const part = await trx("repair_parts_inventory")
