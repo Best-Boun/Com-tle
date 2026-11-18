@@ -106,6 +106,14 @@ function createFakeBookingRepository({ now = () => FIXED_NOW } = {}) {
             return [...bookings.values()]
                 .filter((b) => b.customer_id === customerId && OPEN_STATUSES.includes(b.status)).length;
         },
+        async expireOpenBefore(cutoff, { reason, createId, at }) {
+            const stale = [...bookings.values()].filter((b) => OPEN_STATUSES.includes(b.status) && b.created_at < cutoff);
+            for (const b of stale) {
+                history.push({ history_id: createId(), booking_id: b.booking_id, old_status: b.status, new_status: "EXPIRED", changed_by: null, reason });
+                bookings.set(b.booking_id, { ...b, status: "EXPIRED", updated_at: at });
+            }
+            return stale.length;
+        },
         async updateStatus(trx, id, fromStatus, changes) {
             const current = bookings.get(id);
             if (!current || current.status !== fromStatus) return false;

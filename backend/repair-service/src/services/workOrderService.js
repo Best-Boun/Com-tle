@@ -7,6 +7,7 @@ const {
     listWorkOrdersSchema,
     assignTechnicianSchema,
     createWalkInSchema,
+    warrantyClaimSchema,
     diagnosisSchema,
     quotationOptionsSchema,
     decisionSchema,
@@ -91,6 +92,26 @@ function createWorkOrderService({
         };
     }
 
+    /**
+     * Task 11: a repaired device is under warranty for WARRANTY_DAYS from
+     * handover. Declined ("no repair") and cancelled jobs have none.
+     */
+    function warranty(workOrder) {
+        if (workOrder.status !== "HANDED_OVER" || workOrder.close_reason !== "REPAIRED" || !workOrder.handed_over_at) {
+            return null;
+        }
+        const startsAt = new Date(workOrder.handed_over_at);
+        const until = new Date(startsAt.getTime() + (rules.warrantyDays ?? 90) * DAY_MS);
+        const leftMs = until.getTime() - now().getTime();
+        return {
+            days: rules.warrantyDays ?? 90,
+            starts_at: startsAt.toISOString(),
+            until: until.toISOString(),
+            active: leftMs > 0,
+            days_left: leftMs > 0 ? Math.ceil(leftMs / DAY_MS) : 0
+        };
+    }
+
     function present(workOrder, fallbackHistory = []) {
         return {
             payment: {
@@ -105,6 +126,7 @@ function createWorkOrderService({
             status: mapStatus(workOrder.status),
             repair_declined: Boolean(workOrder.repair_declined),
             pickup: pickup(workOrder),
+            warranty: warranty(workOrder),
             work_order_number: workOrder.work_order_number
                 || `WO-${workOrder.work_order_id.replace(/-/g, "").slice(0, 10).toUpperCase()}`,
             created_at: workOrder.received_at || workOrder.created_at,
@@ -347,6 +369,58 @@ function createWorkOrderService({
             );
         }
         return result.workOrder || result.part;
+    }
+
+/**
+     * Task 12: the same fault came back within the warranty. The shop opens a
+     * claim work order linked to the original; its quotations are free.
+     */
+    async function createWarrantyClaim(parentId, input, user) {
+        requirePermission(user, PERMISSIONS.WORK_ORDER_RECEIVE_CREATE);
+        const data = parseInput(warrantyClaimSchema, input, "Invalid warranty claim details");
+        if (!data.intake_terms_acknowledged) {
+            throw new AppError("Customer intake terms acknowledgement is required", 400);
+        }
+        const createdAt = now();
+        const result = await workOrderRepository.createWarrantyClaim(
+            parentId,
+            (parent) => Boolean(warranty(parent)?.active),
+            (parent) => {
+                const workOrderId = createId();
+                return {
+                    workOrder: {
+                        work_order_id: workOrderId,
+                        work_order_number: `WO-${createdAt.toISOString().slice(0, 10).replace(/-/g, "")}-${workOrderId.slice(0, 6).toUpperCase()}`,
+                        reported_symptom: data.reported_symptom,
+                        accessories: data.accessories || null,
+                        intake_terms_acknowledged_at: createdAt,
+                        device_id: createId(),
+                        received_at: createdAt,
+                        created_at: createdAt,
+                        updated_at: createdAt
+                    },
+                    initialHistory: {
+                        history_id: createId(),
+                        work_order_id: workOrderId,
+                        old_status: null,
+                        new_status: "RECEIVED",
+                        changed_by_user_id: user.userId,
+                        reason: `Warranty claim for ${parent.work_order_number}`,
+                        created_at: createdAt
+                    }
+                };
+            }
+        );
+        if (result.notFound) {
+            throw new AppError("Work order not found", 404);
+        }
+        if (result.notEligible) {
+            throw new AppError("This work order is not under warranty", 409);
+        }
+        if (result.openClaim) {
+            throw new AppError(`A warranty claim is already open: ${result.openClaim}`, 409);
+        }
+        return present(result.workOrder);
     }
 
     async function createWalkIn(input, user) {
@@ -625,6 +699,7 @@ function createWorkOrderService({
         listMine,
         listAssigned,
         listQueue,
+        createWarrantyClaim,
         claim,
         assignTechnician,
         listAll,

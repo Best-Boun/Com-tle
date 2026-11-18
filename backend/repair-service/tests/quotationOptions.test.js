@@ -24,11 +24,11 @@ function serviceWith(repository, extra = {}) {
     });
 }
 
-test("workflow rules default to a 300 THB no-repair fee and 7 free storage days", () => {
-    assert.deepEqual(loadWorkflowConfig({}), { noRepairFee: 300, freeStorageDays: 7 });
+test("workflow rules default to a 300 THB no-repair fee, 7 free storage days and a 90-day warranty", () => {
+    assert.deepEqual(loadWorkflowConfig({}), { noRepairFee: 300, freeStorageDays: 7, warrantyDays: 90 });
     assert.deepEqual(
-        loadWorkflowConfig({ NO_REPAIR_FEE: "250", FREE_STORAGE_DAYS: "10" }),
-        { noRepairFee: 250, freeStorageDays: 10 }
+        loadWorkflowConfig({ NO_REPAIR_FEE: "250", FREE_STORAGE_DAYS: "10", WARRANTY_DAYS: "180" }),
+        { noRepairFee: 250, freeStorageDays: 10, warrantyDays: 180 }
     );
     assert.throws(() => loadWorkflowConfig({ NO_REPAIR_FEE: "-1" }), /whole number/);
 });

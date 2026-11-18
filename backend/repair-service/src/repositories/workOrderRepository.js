@@ -13,6 +13,7 @@ function workOrderQuery(db) {
             "wo.source",
             "wo.booking_id",
             "wo.booking_number",
+            "wo.parent_work_order_id",
             "wo.customer_id",
             "wo.customer_name",
             "wo.customer_phone",
@@ -109,6 +110,29 @@ function presentPart(part) {
     };
 }
 
+/**
+ * Task 12: a warranty claim is a work order whose parent_work_order_id is the
+ * original repair. Each side shows the other.
+ */
+async function loadWarrantyLinks(db, workOrder) {
+    const [parent, claims] = await Promise.all([
+        workOrder.parent_work_order_id
+            ? db("work_orders")
+                .select("work_order_id", "work_order_number", "handed_over_at")
+                .where({ work_order_id: workOrder.parent_work_order_id })
+                .first()
+            : null,
+        db("work_orders")
+            .select("work_order_id", "work_order_number", "status", "created_at")
+            .where({ parent_work_order_id: workOrder.work_order_id })
+            .orderBy("created_at", "asc")
+    ]);
+    return {
+        warranty_parent: parent || null,
+        warranty_claims: claims
+    };
+}
+
 async function loadWorkOrderDetails(db, workOrderId) {
     const workOrder = await workOrderQuery(db)
         .where("wo.work_order_id", workOrderId)
@@ -116,6 +140,7 @@ async function loadWorkOrderDetails(db, workOrderId) {
     if (!workOrder) {
         return null;
     }
+    const warrantyLinks = await loadWarrantyLinks(db, workOrder);
 
     const [
         history,
@@ -324,7 +349,8 @@ async function loadWorkOrderDetails(db, workOrderId) {
                 remaining_qty: Math.max(0, allowance.approved_qty - issued)
             };
         }),
-        stock_movements: presentedMovements
+        stock_movements: presentedMovements,
+        ...warrantyLinks
     };
 }
 
@@ -443,6 +469,65 @@ function createWorkOrderRepository(db) {
                     work_order_id: workOrder.work_order_id,
                     created_at: workOrder.created_at
                 });
+            });
+        },
+
+/**
+         * Task 12: open a warranty claim for a repaired device. The original row
+         * is locked so two claims cannot be opened for it at the same time.
+         * Returns { notFound }, { notEligible }, { openClaim } or the new work order.
+         */
+        async createWarrantyClaim(parentId, isEligible, buildClaim) {
+            return db.transaction(async (trx) => {
+                const parentRow = await trx("work_orders").where({ work_order_id: parentId }).forUpdate().first();
+                if (!parentRow) {
+                    return { notFound: true };
+                }
+                const parent = presentRow(await workOrderQuery(trx).where("wo.work_order_id", parentId).first());
+                if (!isEligible(parent)) {
+                    return { notEligible: true };
+                }
+                const open = await trx("work_orders")
+                    .where({ parent_work_order_id: parentId })
+                    .whereNotIn("status", ["HANDED_OVER", "ABANDONED"])
+                    .first();
+                if (open) {
+                    return { openClaim: open.work_order_number };
+                }
+                const { workOrder, initialHistory } = buildClaim(parent);
+                await trx("work_orders").insert({
+                    work_order_id: workOrder.work_order_id,
+                    work_order_number: workOrder.work_order_number,
+                    source: parent.source,
+                    booking_id: null,
+                    parent_work_order_id: parentId,
+                    customer_id: parent.customer_id,
+                    customer_name: parent.customer_name,
+                    customer_phone: parent.customer_phone,
+                    service_id: parent.service_id,
+                    service_code: parent.service_code,
+                    service_name: parent.service_name,
+                    reported_symptom: workOrder.reported_symptom,
+                    intake_terms_acknowledged_at: workOrder.intake_terms_acknowledged_at,
+                    status: "RECEIVED",
+                    received_at: workOrder.received_at,
+                    created_at: workOrder.created_at,
+                    updated_at: workOrder.updated_at
+                });
+                await trx("work_order_devices").insert({
+                    device_id: workOrder.device_id,
+                    work_order_id: workOrder.work_order_id,
+                    device_type: parent.device_type,
+                    brand: parent.brand,
+                    model: parent.model,
+                    serial_number: parent.serial_number,
+                    accessories_received: workOrder.accessories
+                        ? JSON.stringify([workOrder.accessories])
+                        : JSON.stringify([]),
+                    created_at: workOrder.created_at
+                });
+                await trx("work_order_status_history").insert(initialHistory);
+                return { workOrder: await loadWorkOrderDetails(trx, workOrder.work_order_id) };
             });
         },
 
@@ -670,14 +755,20 @@ function createWorkOrderRepository(db) {
                     updated_at: sentAt
                 });
 
-                const fee = rules.noRepairFee;
+                // Task 12: a warranty claim is free, so every price is 0
+                // (also "no repair"); everything else works the same.
+                const claim = Boolean(result.workOrder.parent_work_order_id);
+                const fee = claim ? 0 : rules.noRepairFee;
+                const free = (items) => (claim ? items.map((item) => ({ ...item, unit_price: 0 })) : items);
                 const options = [
-                    ...quotation.options.map((option) => ({ ...option, kind: "REPAIR" })),
+                    ...quotation.options.map((option) => ({ ...option, items: free(option.items), kind: "REPAIR" })),
                     kind === "INITIAL"
                         ? {
                             kind: "NO_REPAIR",
                             title: "ไม่ซ่อม รับเครื่องคืน",
-                            description: `ตรวจเช็กฟรีเมื่อซ่อม หากไม่ซ่อมคิดค่าตรวจเช็ก ${fee} บาท`,
+                            description: claim
+                                ? "งานเคลมประกัน ไม่มีค่าใช้จ่าย"
+                                : `ตรวจเช็กฟรีเมื่อซ่อม หากไม่ซ่อมคิดค่าตรวจเช็ก ${fee} บาท`,
                             items: [{
                                 type: "LABOR",
                                 description: "ค่าตรวจเช็ก (ไม่ซ่อม)",

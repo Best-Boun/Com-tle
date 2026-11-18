@@ -5,6 +5,8 @@
  *                       repair. Inspection is free when they do repair.
  *   FREE_STORAGE_DAYS   days a ready device is kept for free before the
  *                       dashboard asks the shop to call the customer.
+ *   WARRANTY_DAYS       warranty on a repaired device (labour and the parts
+ *                       the shop replaced), counted from handover.
  */
 function wholeNumber(env, name, fallback) {
     const raw = env[name];
@@ -20,7 +22,8 @@ function wholeNumber(env, name, fallback) {
 function loadWorkflowConfig(env = process.env) {
     return {
         noRepairFee: wholeNumber(env, "NO_REPAIR_FEE", 300),
-        freeStorageDays: wholeNumber(env, "FREE_STORAGE_DAYS", 7)
+        freeStorageDays: wholeNumber(env, "FREE_STORAGE_DAYS", 7),
+        warrantyDays: wholeNumber(env, "WARRANTY_DAYS", 90)
     };
 }
 

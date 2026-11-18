@@ -4,6 +4,7 @@ import { useI18n } from "../../i18n/I18nProvider.jsx";
 import { api } from "../../api/index.js";
 import { useAsync } from "../../utils/useAsync.js";
 import { ErrorNotice, Loading, Stamp, TextField, useAction } from "../../components/ui.jsx";
+import { WarrantyNotice } from "../../components/Warranty.jsx";
 import { QuotationCard, WoHistory, deviceLabel } from "../../components/repair.jsx";
 import OptionsEditor, { blankOption, optionsPayload, optionsValid } from "../../components/OptionsEditor.jsx";
 
@@ -85,6 +86,7 @@ export default function TechJobDetail() {
                 </div>
                 <Stamp kind="wo" status={w.status} />
             </div>
+            <WarrantyNotice w={w} base={null} />
 
             <div className="split">
                 <div className="stack-lg">

@@ -222,6 +222,7 @@ Endpoint ภายใน (เรียกได้เฉพาะระหว่
 | GET | `/api/repairs/work-orders/assigned` | TECHNICIAN | งานที่ได้รับมอบหมาย |
 | GET | `/api/repairs/work-orders/queue` | TECHNICIAN / ADMIN | คิวงานรอช่าง: เครื่องที่รับแล้วแต่ยังไม่มีช่างรับ (รอนานสุดก่อน) |
 | POST | `/api/repairs/work-orders/:workOrderId/claim` | TECHNICIAN | ช่างรับงานจากคิวเอง ใครกดก่อนได้ก่อน (มีคนรับแล้ว 409) |
+| POST | `/api/repairs/work-orders/:workOrderId/warranty-claims` | ADMIN | อาการเดิมกลับมาในระยะประกัน (90 วันหลังส่งมอบ): เปิดใบงานเคลมผูกกับใบเดิม ทุกตัวเลือกในใบเสนอราคาเป็น ฿0 เปิดได้ครั้งละ 1 ใบ |
 | GET | `/api/repairs/work-orders/:workOrderId` | ผู้เกี่ยวข้อง | รายละเอียดใบงาน |
 | POST | `/api/repairs/work-orders/:workOrderId/assign` | ADMIN | มอบหมาย/เปลี่ยนช่าง |
 | POST | `/api/repairs/work-orders/:workOrderId/diagnosis/start` | TECHNICIAN | เริ่มวินิจฉัย |
@@ -359,5 +360,6 @@ npm run dev          # http://localhost:5173
 
 - `frontend/.env` ตั้ง `VITE_USE_MOCK=false` เพื่อต่อ API จริง (ข้อมูลบน Railway) หรือ `true` เพื่อใช้ข้อมูลตัวอย่างที่เก็บในเบราว์เซอร์โดยไม่ต้องรัน backend ทั้งสองโหมดใช้ข้อมูลคนละชุดกัน
 - ฐานข้อมูลใหม่ หรือเมื่อมีการเปลี่ยนตาราง: รัน `npx knex migrate:latest` ในโฟลเดอร์ของบริการนั้น (booking-service, repair-service, payment-service, user-service, catalog-service)
-- ค่าที่ปรับได้ (booking-service): บริการตั้งต้นของคำขอ `REQUEST_DIAGNOSIS_SERVICE_ID`, คำขอที่เปิดได้ต่อลูกค้า `REQUEST_MAX_OPEN_PER_CUSTOMER`, อายุคำขอก่อนปิดอัตโนมัติ `REQUEST_EXPIRY_DAYS`
+- ค่าที่ปรับได้ (repair-service): ระยะรับประกัน `WARRANTY_DAYS` (ค่าเริ่มต้น 90 วัน นับจากวันส่งมอบ เฉพาะงานที่ซ่อม ไม่รวมงานที่เลือกไม่ซ่อมหรือยกเลิก) ใบงานแสดง `warranty` และ `warranty_parent` / `warranty_claims`
+- ค่าที่ปรับได้ (booking-service): บริการตั้งต้นของคำขอ `REQUEST_DIAGNOSIS_SERVICE_ID`, คำขอที่เปิดได้ต่อลูกค้า `REQUEST_MAX_OPEN_PER_CUSTOMER`, อายุคำขอก่อนปิดอัตโนมัติ `REQUEST_EXPIRY_DAYS` (ค่าเริ่มต้น 30 วัน booking-service ตรวจทุก `REQUEST_EXPIRY_CHECK_MINUTES` นาที แล้วเปลี่ยนคำขอที่ไม่มีใครนำเครื่องมาเป็น EXPIRED)
 - ตาราง/คอลัมน์ของระบบมัดจำที่ถอดออกแล้ว (`deposits`, `deposit_audit_logs`, `bookings.deposit_due_at`) ยังอยู่ในฐานข้อมูลแต่ไม่มีโค้ดใช้ เพราะ migration รันไปแล้ว ถ้าจะลบให้ทำเป็น migration ใหม่

@@ -70,6 +70,13 @@ const createWalkInSchema = z.object({
     intake_terms_acknowledged: z.boolean()
 }).strict();
 
+/** Task 12: the same fault came back while the repair is under warranty. */
+const warrantyClaimSchema = z.object({
+    reported_symptom: z.string().trim().min(1).max(5000),
+    accessories: nullableText(1000),
+    intake_terms_acknowledged: z.boolean()
+}).strict();
+
 const diagnosisSchema = z.string().trim().min(1).max(5000);
 const quotationItemSchema = z.object({
     item_id: z.string().uuid().optional(),
@@ -147,6 +154,7 @@ module.exports = {
     listWorkOrdersSchema,
     assignTechnicianSchema,
     createWalkInSchema,
+    warrantyClaimSchema,
     diagnosisSchema,
     quotationOptionsSchema,
     decisionSchema,

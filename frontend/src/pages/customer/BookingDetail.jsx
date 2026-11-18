@@ -70,7 +70,7 @@ export default function BookingDetail() {
                     {b.status_history.map((h) => (
                         <li key={h.history_id}>
                             <strong>{t(`status.booking.${h.new_status}`)}</strong>
-                            <div className="faint small">{fmt.dateTime(h.created_at)} · {h.changed_by_name}{h.reason ? ` · ${h.reason}` : ""}</div>
+                            <div className="faint small">{fmt.dateTime(h.created_at)} · {h.changed_by_name || L("ระบบ", "System")}{h.reason ? ` · ${h.reason}` : ""}</div>
                         </li>
                     ))}
                 </ol>
