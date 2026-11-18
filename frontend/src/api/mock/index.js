@@ -22,13 +22,6 @@ import {
 import { getSessionUser, setSessionUser } from "../session.js";
 
 const ACTIVE_BOOKING = ["PENDING", "CONFIRMED", "COMPLETED"];
-const DEPOSIT_TIMEOUT = "Deposit not paid in time";
-
-/** A booking takes its slot when active, or while its deposit hold is still running. */
-function occupies(b) {
-    return ACTIVE_BOOKING.includes(b.status)
-        || (b.status === "AWAITING_DEPOSIT" && new Date(b.deposit_due_at).getTime() > Date.now());
-}
 const OPEN_WO = ["PENDING", "DIAGNOSING", "WAITING_APPROVAL", "APPROVED", "REPAIRING", "TESTING"];
 
 // ---------------------------------------------------------------- helpers
@@ -376,7 +369,7 @@ function bookingHistory(bookingId) {
 }
 
 function changeBooking(b, to, user, { reason = null, changes = {} } = {}) {
-    const allowed = { AWAITING_DEPOSIT: ["CONFIRMED", "CANCELLED"], PENDING: ["CONFIRMED", "CANCELLED", "NO_SHOW"], CONFIRMED: ["COMPLETED", "CANCELLED", "NO_SHOW"], COMPLETED: [], CANCELLED: [], NO_SHOW: [] };
+    const allowed = { PENDING: ["CONFIRMED", "CANCELLED", "NO_SHOW"], CONFIRMED: ["COMPLETED", "CANCELLED", "NO_SHOW"], COMPLETED: [], CANCELLED: [], NO_SHOW: [] };
     if (!allowed[b.status].includes(to)) {
         throw bad(`เปลี่ยนสถานะจาก ${b.status} เป็น ${to} ไม่ได้`, `Booking cannot change from ${b.status} to ${to}`, 409);
     }
@@ -385,16 +378,6 @@ function changeBooking(b, to, user, { reason = null, changes = {} } = {}) {
 }
 
 const OPEN_BOOKING = ["PENDING", "CONFIRMED"];
-
-/** Unpaid holds that ran out become cancelled, like Booking-Service does before reads. */
-function expireHolds() {
-    for (const b of getDb().bookings) {
-        if (b.status === "AWAITING_DEPOSIT" && new Date(b.deposit_due_at).getTime() <= Date.now()) {
-            getDb().bookingHistory.push({ history_id: newId(), booking_id: b.booking_id, old_status: b.status, new_status: "CANCELLED", changed_by: null, reason: DEPOSIT_TIMEOUT, created_at: now() });
-            Object.assign(b, { status: "CANCELLED", cancelled_at: now(), cancelled_by: null, cancellation_reason: DEPOSIT_TIMEOUT, updated_at: now() });
-        }
-    }
-}
 
 /** For the shop: how many times this customer did not come. */
 function withNoShowCount(b) {
@@ -422,7 +405,7 @@ export const bookings = {
         requireRole("CUSTOMER", "ADMIN");
         const counts = {};
         for (const b of getDb().bookings) {
-            if (!occupies(b)) continue;
+            if (!ACTIVE_BOOKING.includes(b.status)) continue;
             const p = presentBooking(b);
             if (p.appointment_date === date) counts[p.appointment_time] = (counts[p.appointment_time] || 0) + 1;
         }
@@ -446,8 +429,7 @@ export const bookings = {
         const scheduledAt = bangkokToIso(input.appointment_date, input.appointment_time);
         if (slotStarted(scheduledAt)) throw bad("เวลานี้ผ่านไปแล้ว", "Selected time has already passed");
         if (!input.device_type?.trim() || !input.reported_symptom?.trim()) throw bad("กรอกประเภทเครื่องและอาการให้ครบ", "Device type and symptom are required");
-        expireHolds();
-        const taken = db.bookings.filter((b) => b.scheduled_at === scheduledAt && occupies(b)).length;
+        const taken = db.bookings.filter((b) => b.scheduled_at === scheduledAt && ACTIVE_BOOKING.includes(b.status)).length;
         if (taken >= SHOP.slotCapacity) throw bad("ช่วงเวลานี้เต็มแล้ว กรุณาเลือกเวลาอื่น", "Selected time slot is fully booked", 409);
 
         const booking = {
@@ -465,9 +447,8 @@ export const bookings = {
             serial_number: input.serial_number?.trim() || null,
             reported_symptom: input.reported_symptom.trim(),
             scheduled_at: scheduledAt,
-            // Held while the customer pays the deposit, like Booking-Service.
-            status: "AWAITING_DEPOSIT",
-            deposit_due_at: new Date(Date.now() + SHOP.depositHoldMinutes * 60 * 1000).toISOString(),
+            // Confirmed straight away, like Booking-Service: capacity was just checked.
+            status: "CONFIRMED",
             work_order_id: null,
             technician_id: null,
             technician_claimed_at: null,
@@ -478,13 +459,12 @@ export const bookings = {
             updated_at: now()
         };
         db.bookings.push(booking);
-        db.bookingHistory.push({ history_id: newId(), booking_id: booking.booking_id, old_status: null, new_status: "AWAITING_DEPOSIT", changed_by: user.user_id, reason: null, created_at: now() });
+        db.bookingHistory.push({ history_id: newId(), booking_id: booking.booking_id, old_status: null, new_status: "CONFIRMED", changed_by: user.user_id, reason: null, created_at: now() });
         return respond(presentBooking(booking), 350);
     }),
 
     listMine: handler(async ({ status } = {}) => {
         const user = requireRole("CUSTOMER");
-        expireHolds();
         let items = getDb().bookings.filter((b) => b.customer_id === user.user_id);
         if (status) items = items.filter((b) => b.status === status);
         items.sort((a, b) => b.scheduled_at.localeCompare(a.scheduled_at));
@@ -493,7 +473,6 @@ export const bookings = {
 
     listAll: handler(async ({ status, date } = {}) => {
         requireRole("ADMIN");
-        expireHolds();
         let items = getDb().bookings.map(presentBooking);
         if (status) items = items.filter((b) => b.status === status);
         if (date) items = items.filter((b) => b.appointment_date === date);
@@ -503,28 +482,9 @@ export const bookings = {
 
     get: handler(async (bookingId) => {
         const user = requireRole("CUSTOMER", "ADMIN");
-        expireHolds();
         const b = loadBooking(bookingId, user);
         const shown = { ...presentBooking(b), status_history: bookingHistory(bookingId) };
         return respond(has(user, "ADMIN") ? withNoShowCount(shown) : shown);
-    }),
-
-    /** The deposit was paid: confirm the held slot (checks the deposit, never trusts the page). */
-    confirmDeposit: handler(async (bookingId) => {
-        const user = requireRole("CUSTOMER");
-        const b = loadBooking(bookingId, user);
-        if (b.status === "CONFIRMED") return respond(presentBooking(b));
-        if (b.status !== "AWAITING_DEPOSIT") throw bad("การจองนี้ไม่ได้รอชำระมัดจำแล้ว", "This booking is no longer waiting for a deposit", 409);
-        const deposit = getDb().deposits.find((d) => d.booking_id === b.booking_id);
-        if (deposit?.status !== "PAID") throw bad("ยังไม่ได้ชำระมัดจำสำหรับการจองนี้", "The deposit for this booking has not been paid", 409);
-        const late = new Date(b.deposit_due_at).getTime() <= Date.now();
-        const others = getDb().bookings.filter((x) => x.booking_id !== b.booking_id && x.scheduled_at === b.scheduled_at && occupies(x)).length;
-        if (late && others >= SHOP.slotCapacity) {
-            changeBooking(b, "CANCELLED", { user_id: null }, { reason: DEPOSIT_TIMEOUT, changes: { cancelled_at: now(), cancelled_by: null, cancellation_reason: DEPOSIT_TIMEOUT } });
-            throw bad("หมดเวลาชำระและคิวนี้มีคนจองไปแล้ว ระบบคืนมัดจำให้แล้ว กรุณาเลือกเวลาใหม่", "The time to pay ran out and the slot was taken; the deposit will be refunded", 409);
-        }
-        changeBooking(b, "CONFIRMED", user, { reason: `Deposit paid (${deposit.reference_number})` });
-        return respond(presentBooking(b));
     }),
 
     /** Open bookings today and the next days, earliest first, for technicians. */
@@ -1117,58 +1077,6 @@ export const payments = {
         if (!["CASH", "TRANSFER", "CARD"].includes(method)) throw bad("เลือกวิธีชำระเงิน", "Choose a payment method");
         getDb().payments.push({ payment_id: newId(), work_order_id: woId, type: "PAYMENT", amount: n, method, recorded_by: user.user_id, note: note?.trim() || null, created_at: now() });
         return respond(presentWo(wo, { detail: true }));
-    }),
-
-    payDeposit: handler(async (bookingId, { method } = {}) => {
-        const user = requireRole("CUSTOMER");
-        const db = getDb();
-        const b = db.bookings.find((x) => x.booking_id === bookingId && x.customer_id === user.user_id);
-        if (!b) throw bad("ไม่พบการจอง", "Booking not found", 404);
-        if (!["PROMPTPAY", "CARD"].includes(method)) throw bad("เลือกวิธีชำระเงิน", "Choose a payment method");
-        const existing = db.deposits.find((d) => d.booking_id === bookingId);
-        if (existing) {
-            if (existing.status === "PAID") return respond(existing);
-            throw bad("การจองนี้ชำระมัดจำไปแล้ว", "A deposit for this booking was already recorded", 409);
-        }
-        if (b.status !== "AWAITING_DEPOSIT") throw bad("การจองนี้ไม่ได้รอชำระมัดจำแล้ว", "This booking is not waiting for a deposit", 409);
-        if (new Date(b.deposit_due_at).getTime() <= Date.now()) throw bad("หมดเวลาชำระมัดจำแล้ว กรุณาจองคิวใหม่", "The time to pay the deposit has run out", 409);
-        const deposit = {
-            deposit_id: newId(), booking_id: bookingId, customer_user_id: user.user_id, amount: SHOP.depositAmount,
-            currency: "THB", status: "PAID", payment_method: method, reference_number: `MOCK-${newId().slice(0, 8).toUpperCase()}`,
-            work_order_id: null, paid_at: now(), settled_at: null
-        };
-        db.deposits.push(deposit);
-        return respond(deposit);
-    }),
-
-    depositFor: handler(async (bookingId) => {
-        const user = requireRole("CUSTOMER", "ADMIN");
-        const d = getDb().deposits.find((x) => x.booking_id === bookingId);
-        if (!d || (!has(user, "ADMIN") && d.customer_user_id !== user.user_id)) return respond(null);
-        return respond(d);
-    }),
-
-    listDeposits: handler(async ({ status } = {}) => {
-        const user = requireRole("CUSTOMER", "ADMIN");
-        return respond(getDb().deposits.filter((d) => (has(user, "ADMIN") || d.customer_user_id === user.user_id) && (!status || d.status === status)));
-    }),
-
-    /** Refund / keep / apply a paid deposit to match its booking. */
-    settleDeposit: handler(async (bookingId) => {
-        const user = requireRole("CUSTOMER", "ADMIN");
-        const db = getDb();
-        const d = db.deposits.find((x) => x.booking_id === bookingId);
-        if (!d || (!has(user, "ADMIN") && d.customer_user_id !== user.user_id)) return respond(null);
-        if (d.status !== "PAID") return respond(d);
-        const b = db.bookings.find((x) => x.booking_id === bookingId);
-        if (b?.status === "CANCELLED") Object.assign(d, { status: "REFUNDED", settled_at: now() });
-        if (b?.status === "NO_SHOW") Object.assign(d, { status: "FORFEITED", settled_at: now() });
-        if (b?.status === "COMPLETED" && b.work_order_id) {
-            Object.assign(d, { status: "APPLIED", work_order_id: b.work_order_id, settled_at: now() });
-            // Credited to the repair: counts as money already paid on the work order.
-            db.payments.push({ payment_id: d.deposit_id, work_order_id: b.work_order_id, type: "PAYMENT", amount: d.amount, method: "DEPOSIT", recorded_by: d.customer_user_id, note: d.reference_number, created_at: d.paid_at });
-        }
-        return respond(d);
     }),
 
     /** Customer online checkout (mock provider): pays the whole outstanding balance. */

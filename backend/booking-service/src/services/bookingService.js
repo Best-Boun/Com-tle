@@ -4,12 +4,7 @@ const { PERMISSIONS } = require("../../../shared/constants");
 const { hasPermission } = require("../../../shared/middleware/serviceAuth");
 const { getPagination, getPaginationMeta } = require("../../../shared/utils/pagination");
 const { parseOrThrow } = require("../../../shared/utils/validation");
-const {
-    BOOKING_STATUS,
-    OPEN_STATUSES,
-    ALLOWED_TRANSITIONS,
-    DEPOSIT_TIMEOUT_REASON
-} = require("../constants");
+const { BOOKING_STATUS, OPEN_STATUSES, ALLOWED_TRANSITIONS } = require("../constants");
 const {
     nowInTimezone,
     zonedToUtc,
@@ -50,7 +45,6 @@ function createBookingService({
     bookingRepository,
     catalogClient,
     repairClient,
-    paymentClient = null,
     config,
     createId = randomUUID,
     createBookingNumber = defaultBookingNumber,
@@ -165,25 +159,6 @@ function createBookingService({
         return items.map((b) => ({ ...b, customer_no_show_count: counts.get(b.customer_id) || 0 }));
     }
 
-    /**
-     * Holds whose deposit was not paid in time become CANCELLED (and free the
-     * slot, which counting already ignores). Run before reads, so lists never
-     * show a stale hold. A hold someone is confirming right now is skipped.
-     */
-    async function expireHolds(filters = {}) {
-        const expired = await repo.listExpiredHolds(now(), filters);
-        for (const booking of expired) {
-            try {
-                await changeStatus(booking, BOOKING_STATUS.CANCELLED, { userId: null }, {
-                    reason: DEPOSIT_TIMEOUT_REASON,
-                    changes: { cancelled_at: now(), cancelled_by: null, cancellation_reason: DEPOSIT_TIMEOUT_REASON }
-                });
-            } catch (error) {
-                if (error.statusCode !== 409) throw error;
-            }
-        }
-    }
-
     async function loadOpenBooking(bookingId) {
         const booking = await loadBooking(bookingId);
         if (!OPEN_STATUSES.includes(booking.status)) {
@@ -196,7 +171,7 @@ function createBookingService({
         async getAvailability(query) {
             const { date } = parseOrThrow(availabilityQuerySchema, query, "Invalid query");
             const { start, end } = dayRangeUtc(date, tz);
-            const taken = await repo.listActiveTimes(start, end, now());
+            const taken = await repo.listActiveTimes(start, end);
             const counts = {};
             for (const instant of taken) {
                 const { time } = utcToZoned(instant, tz);
@@ -227,7 +202,7 @@ function createBookingService({
             for (let attempt = 0; attempt < 3; attempt += 1) {
                 try {
                     await repo.withSlotLock(slotKey, async (trx) => {
-                        const taken = await repo.countActiveAt(trx, scheduledAt, now());
+                        const taken = await repo.countActiveAt(trx, scheduledAt);
                         if (taken >= config.slotCapacity) {
                             throw new AppError("Selected time slot is fully booked", 409);
                         }
@@ -246,16 +221,15 @@ function createBookingService({
                             serial_number: data.serial_number || null,
                             reported_symptom: data.reported_symptom,
                             scheduled_at: scheduledAt,
-                            // The slot is held while the customer pays the deposit;
-                            // it becomes CONFIRMED once Payment-Service has the money.
-                            status: BOOKING_STATUS.AWAITING_DEPOSIT,
-                            deposit_due_at: new Date(now().getTime() + config.depositHoldMinutes * 60 * 1000)
+                            // Confirmed straight away: the slot's capacity was just
+                            // checked under its lock, so the shop can take it.
+                            status: BOOKING_STATUS.CONFIRMED
                         });
                         await repo.insertHistory(trx, {
                             history_id: createId(),
                             booking_id: bookingId,
                             old_status: null,
-                            new_status: BOOKING_STATUS.AWAITING_DEPOSIT,
+                            new_status: BOOKING_STATUS.CONFIRMED,
                             changed_by: user.userId,
                             reason: null
                         });
@@ -277,19 +251,16 @@ function createBookingService({
 
         async listMyBookings(query, user) {
             const filters = parseOrThrow(listQuerySchema, query, "Invalid query");
-            await expireHolds({ customerId: user.userId });
             return listWith({ customerId: user.userId }, filters);
         },
 
         async listBookings(query) {
             const filters = parseOrThrow(listQuerySchema, query, "Invalid query");
-            await expireHolds();
             const result = await listWith({ customerId: filters.customer_id }, filters);
             return { ...result, items: await withNoShowCounts(result.items) };
         },
 
         async getBooking(bookingId, user) {
-            if (uuidSchema.safeParse(bookingId).success) await expireHolds({ bookingId });
             const booking = await loadVisibleBooking(bookingId, user);
             const history = await repo.findHistory(booking.booking_id);
             const shown = { ...present(booking), status_history: history };
@@ -346,55 +317,6 @@ function createBookingService({
             }
             const { reason } = parseOrThrow(reasonSchema, input || {}, "Invalid no-show details");
             return changeStatus(booking, BOOKING_STATUS.NO_SHOW, user, { reason: reason || null });
-        },
-
-        /**
-         * The customer paid the deposit: confirm the held slot. The caller is
-         * never trusted about payment; Payment-Service is asked (with the
-         * caller's token) whether this booking's deposit is really paid.
-         */
-        async confirmDeposit(bookingId, user, { authorization }) {
-            const booking = await loadVisibleBooking(bookingId, user);
-            if (!isOwner(user, booking)) {
-                throw new AppError("Booking not found", 404);
-            }
-            if (booking.status === BOOKING_STATUS.CONFIRMED) {
-                return present(booking);
-            }
-            if (booking.status !== BOOKING_STATUS.AWAITING_DEPOSIT) {
-                throw new AppError("This booking is no longer waiting for a deposit", 409);
-            }
-            if (!paymentClient) {
-                throw new AppError("Payment Service is unavailable, please try again", 503);
-            }
-            const deposit = await paymentClient.getDeposit(booking.booking_id, { authorization });
-            if (!deposit || deposit.status !== "PAID") {
-                throw new AppError("The deposit for this booking has not been paid", 409);
-            }
-
-            // Paid in time, or late but the slot still has room: confirm. Late
-            // with the slot taken meanwhile: release the hold; the deposit is
-            // refunded when Payment-Service settles it.
-            const confirmed = await repo.withSlotLock(new Date(booking.scheduled_at).toISOString(), async (trx) => {
-                const late = new Date(booking.deposit_due_at).getTime() <= now().getTime();
-                if (late) {
-                    const taken = await repo.countActiveAt(trx, new Date(booking.scheduled_at), now(), booking.booking_id);
-                    if (taken >= config.slotCapacity) {
-                        return false;
-                    }
-                }
-                return true;
-            });
-            if (!confirmed) {
-                await changeStatus(booking, BOOKING_STATUS.CANCELLED, { userId: null }, {
-                    reason: DEPOSIT_TIMEOUT_REASON,
-                    changes: { cancelled_at: now(), cancelled_by: null, cancellation_reason: DEPOSIT_TIMEOUT_REASON }
-                });
-                throw new AppError("The time to pay ran out and the slot was taken; the deposit will be refunded", 409);
-            }
-            return changeStatus(booking, BOOKING_STATUS.CONFIRMED, user, {
-                reason: `Deposit paid (${deposit.reference_number || deposit.deposit_id})`
-            });
         },
 
         async confirmBooking(bookingId, user) {

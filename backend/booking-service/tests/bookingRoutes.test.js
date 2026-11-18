@@ -21,14 +21,11 @@ const A1 = "aaaaaaaa-0000-4000-8000-000000000009";
 
 async function withServer(fn) {
     const clients = createFakeClients();
-    // Every deposit counts as paid here; the deposit rules are in bookingService.test.js.
-    clients.paymentClient.getDeposit = async (bookingId) => ({ booking_id: bookingId, deposit_id: "d1", status: "PAID" });
     const app = createApp({
         bookingService: createBookingService({
             bookingRepository: createFakeBookingRepository(),
             catalogClient: clients.catalogClient,
             repairClient: clients.repairClient,
-            paymentClient: clients.paymentClient,
             config: TEST_CONFIG,
             now: () => FIXED_NOW
         }),
@@ -89,10 +86,7 @@ test("full flow: create (confirmed) -> check-in (COMPLETED)", async () => {
     await withServer(async (base) => {
         const created = await fetch(base, { method: "POST", headers: headers(C1, ["CUSTOMER"]), body: payload });
         const { booking_id: id, status } = (await created.json()).data;
-        assert.equal(status, "AWAITING_DEPOSIT");
-        assert.equal((await fetch(`${base}/${id}/confirm-deposit`, { method: "POST", headers: headers(A1, ["ADMIN"]) })).status, 403);
-        const paid = await fetch(`${base}/${id}/confirm-deposit`, { method: "POST", headers: headers(C1, ["CUSTOMER"]) });
-        assert.equal((await paid.json()).data.status, "CONFIRMED");
+        assert.equal(status, "CONFIRMED");
 
         assert.equal((await fetch(`${base}/${id}/confirm`, { method: "PATCH", headers: headers(C1, ["CUSTOMER"]) })).status, 403);
         assert.equal((await fetch(`${base}/${id}/no-show`, { method: "PATCH", headers: headers(C1, ["CUSTOMER"]) })).status, 403);
@@ -119,7 +113,6 @@ test("technicians see the queue and take a job; customers cannot", async () => {
         const T1 = "bbbbbbbb-0000-4000-8000-000000000001";
         const created = await fetch(base, { method: "POST", headers: headers(C1, ["CUSTOMER"]), body: payload });
         const { booking_id: id } = (await created.json()).data;
-        await fetch(`${base}/${id}/confirm-deposit`, { method: "POST", headers: headers(C1, ["CUSTOMER"]) });
 
         assert.equal((await fetch(`${base}/queue`, { headers: headers(C1, ["CUSTOMER"]) })).status, 403);
         const queue = await fetch(`${base}/queue`, { headers: headers(T1, ["TECHNICIAN"]) });

@@ -5,7 +5,6 @@ import { api } from "../../api/index.js";
 import { useAsync } from "../../utils/useAsync.js";
 import { ErrorNotice, Loading, Money, PageHead, TextField, useAction } from "../../components/ui.jsx";
 import Ticket from "../../components/Ticket.jsx";
-import DepositCheckout from "../../components/DepositCheckout.jsx";
 import "./customer.css";
 
 function bangkokToday() {
@@ -34,10 +33,6 @@ export default function BookService() {
     const [time, setTime] = useState("");
     const [device, setDevice] = useState({ device_type: "", brand: "", model: "", serial_number: "", reported_symptom: "" });
     const [created, setCreated] = useState(null);
-    // Booked but the deposit not paid yet: the slot is held for a few minutes.
-    const [held, setHeld] = useState(null);
-    const [paying, setPaying] = useState(false);
-    const deposit = api.bookings.config.depositAmount || 200;
     const [run, busy] = useAction();
 
     const services = useAsync(() => api.catalog.listServices(), []);
@@ -60,39 +55,10 @@ export default function BookService() {
 
     async function confirm() {
         const booking = await run(
-            () => api.bookings.create({ service_id: serviceId, appointment_date: date, appointment_time: time, ...device })
+            () => api.bookings.create({ service_id: serviceId, appointment_date: date, appointment_time: time, ...device }),
+            L("จองคิวเรียบร้อย", "Booking sent")
         ).catch(() => null);
-        if (booking) {
-            setHeld(booking);
-            setPaying(true);
-        }
-    }
-
-    if (held && !created) {
-        return (
-            <div className="stack-lg" style={{ maxWidth: 720 }}>
-                <PageHead title={L("ชำระมัดจำเพื่อยืนยันคิว", "Pay the deposit to confirm")} lede={L(`กันคิวไว้ให้ถึง ${fmt.time(held.deposit_due_at)} น. ชำระมัดจำ ${fmt.money(deposit)} ภายในเวลานี้เพื่อยืนยันคิว ถ้าไม่ชำระ คิวจะถูกปล่อยให้คนอื่น`, `Your slot is held until ${fmt.time(held.deposit_due_at)}. Pay the ${fmt.money(deposit)} deposit before then to confirm it, or the slot is released.`)} />
-                <Ticket
-                    to={`/my/bookings/${held.booking_id}`}
-                    number={held.booking_number}
-                    title={held.service_name}
-                    meta={[fmt.dateLong(held.scheduled_at), `${held.appointment_time} ${L("น.", "")}`.trim()]}
-                    kind="booking"
-                    status={held.status}
-                />
-                <div className="btn-row">
-                    <button type="button" className="btn btn-primary btn-lg" onClick={() => setPaying(true)}>{L("ชำระมัดจำ", "Pay deposit")} <Money value={deposit} /></button>
-                    <Link to={`/my/bookings/${held.booking_id}`} className="btn btn-secondary btn-lg">{L("ดูการจอง", "View booking")}</Link>
-                </div>
-                {paying && (
-                    <DepositCheckout
-                        booking={held}
-                        onClose={() => setPaying(false)}
-                        onPaid={(confirmed) => { setCreated(confirmed); setPaying(false); }}
-                    />
-                )}
-            </div>
-        );
+        if (booking) setCreated(booking);
     }
 
     if (created) {
@@ -236,11 +202,11 @@ export default function BookService() {
                         </dl>
                     </div>
                     <div className="notice info">
-                        {L(`ขั้นต่อไปชำระมัดจำ ${fmt.money(deposit)} เพื่อยืนยันคิว มัดจำหักจากค่าซ่อมเมื่อมาตามนัด ยกเลิกก่อนเวลานัดได้เงินคืนเต็ม แต่ถ้าไม่มาตามนัด ร้านขอเก็บมัดจำไว้ ราคาจริงจะแจ้งในใบเสนอราคาหลังช่างตรวจเครื่อง ร้านจะไม่เริ่มซ่อมจนกว่าคุณกดอนุมัติ`, `Next you pay a ${fmt.money(deposit)} deposit to confirm the slot. It comes off the repair bill when you come; cancel before the appointment for a full refund, but the shop keeps it if you don't show up. You'll get a quotation after we check the device, and we won't start until you approve it.`)}
+                        {L("กดยืนยันแล้วได้คิวทันที ราคาจริงจะแจ้งในใบเสนอราคาหลังช่างตรวจเครื่อง ร้านจะไม่เริ่มซ่อมจนกว่าคุณกดอนุมัติ ยกเลิกการจองได้ก่อนถึงเวลานัด", "Your slot is confirmed as soon as you book. You'll get a quotation after we check the device, and we won't start until you approve it. You can cancel before your appointment.")}
                     </div>
                     <div className="btn-row">
                         <button type="button" className="btn btn-secondary btn-lg" onClick={() => setStep(2)}>{L("ย้อนกลับ", "Back")}</button>
-                        <button type="button" className="btn btn-primary btn-lg" disabled={busy} onClick={confirm}>{busy ? L("กำลังจอง…", "Booking…") : <>{L("จองและชำระมัดจำ", "Book & pay deposit")} <Money value={deposit} /></>}</button>
+                        <button type="button" className="btn btn-primary btn-lg" disabled={busy} onClick={confirm}>{busy ? L("กำลังจอง…", "Booking…") : L("ยืนยันการจอง", "Confirm booking")}</button>
                     </div>
                 </section>
             )}

@@ -30,7 +30,6 @@ const TEST_CONFIG = {
     slotTimes: ["09:00", "10:00", "11:00", "13:00"],
     slotCapacity: 2,
     maxDaysAhead: 30,
-    depositHoldMinutes: 10,
     catalogServiceUrl: "http://catalog.test",
     repairServiceUrl: "http://repair.test",
     serviceCallTimeoutMs: 1000
@@ -56,29 +55,20 @@ function createFakeBookingRepository() {
         }
     }
 
-    // Like the repository: active bookings, plus holds whose time to pay has not run out.
-    const active = (b, now = new Date(0)) => SLOT_OCCUPYING_STATUSES.includes(b.status)
-        || (b.status === "AWAITING_DEPOSIT" && b.deposit_due_at > now);
+    const active = (b) => SLOT_OCCUPYING_STATUSES.includes(b.status);
 
     return {
         bookings,
         history,
         transaction: inTransaction,
         withSlotLock: (key, work) => inTransaction(work),
-        async countActiveAt(trx, scheduledAt, now = new Date(0), exceptBookingId = null) {
-            return [...bookings.values()].filter((b) => b.booking_id !== exceptBookingId
-                && active(b, now) && b.scheduled_at.getTime() === scheduledAt.getTime()).length;
+        async countActiveAt(trx, scheduledAt) {
+            return [...bookings.values()].filter((b) => active(b) && b.scheduled_at.getTime() === scheduledAt.getTime()).length;
         },
-        async listActiveTimes(from, to, now = new Date(0)) {
+        async listActiveTimes(from, to) {
             return [...bookings.values()]
-                .filter((b) => active(b, now) && b.scheduled_at >= from && b.scheduled_at < to)
+                .filter((b) => active(b) && b.scheduled_at >= from && b.scheduled_at < to)
                 .map((b) => b.scheduled_at);
-        },
-        async listExpiredHolds(now, { customerId, bookingId } = {}) {
-            return [...bookings.values()]
-                .filter((b) => b.status === "AWAITING_DEPOSIT" && b.deposit_due_at <= now)
-                .filter((b) => (!customerId || b.customer_id === customerId) && (!bookingId || b.booking_id === bookingId))
-                .map((b) => ({ ...b }));
         },
         async insertBooking(trx, booking) {
             if ([...bookings.values()].some((b) => b.booking_number === booking.booking_number)) {
@@ -89,7 +79,6 @@ function createFakeBookingRepository() {
             bookings.set(booking.booking_id, {
                 ...booking,
                 scheduled_at: new Date(booking.scheduled_at),
-                deposit_due_at: booking.deposit_due_at ? new Date(booking.deposit_due_at) : null,
                 work_order_id: null,
                 technician_id: null,
                 technician_claimed_at: null,
@@ -154,7 +143,7 @@ function createFakeBookingRepository() {
 
 function createFakeClients() {
     const calls = { catalog: [], repair: [] };
-    const state = { repairFails: false, workOrders: new Map(), deposits: new Map() };
+    const state = { repairFails: false, workOrders: new Map() };
 
     return {
         calls,
@@ -174,14 +163,6 @@ function createFakeClients() {
                     is_active: true,
                     category_is_active: true
                 };
-            }
-        },
-        // Payment-Service: deposits recorded per booking id.
-        paymentClient: {
-            async getDeposit(bookingId, ctx) {
-                calls.payment = calls.payment || [];
-                calls.payment.push({ bookingId, ctx });
-                return state.deposits.get(bookingId) || null;
             }
         },
         repairClient: {

@@ -37,10 +37,6 @@ const paymentRoutePatterns = [
     ["GET", /^\/balances(?:\/[^/]+)?$/],
     ["GET", /^\/my$/],
     ["POST", /^\/checkout$/],
-    ["POST", /^\/deposits$/],
-    ["GET", /^\/deposits$/],
-    ["GET", /^\/deposits\/[^/]+$/],
-    ["POST", /^\/deposits\/[^/]+\/settle$/],
     ["POST", /^\/work-orders\/[^/]+\/(?:lock|unlock)$/],
     ["POST", /^\/refunds$/],
     ["GET", /^\/refunds$/],
@@ -57,7 +53,7 @@ const bookingRoutePatterns = [
     ["POST", /^\/$/],
     ["GET", new RegExp(`^\\/${UUID}$`)],
     ["PATCH", new RegExp(`^\\/${UUID}\\/(?:confirm|cancel|no-show)$`)],
-    ["POST", new RegExp(`^\\/${UUID}\\/(?:check-in|confirm-deposit)$`)],
+    ["POST", new RegExp(`^\\/${UUID}\\/check-in$`)],
     ["POST", new RegExp(`^\\/${UUID}\\/claim$`)],
     ["DELETE", new RegExp(`^\\/${UUID}\\/claim$`)]
 ];

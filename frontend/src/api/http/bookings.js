@@ -77,11 +77,6 @@ export const bookings = {
         return { ...(await withCustomerName(booking)), status_history: history };
     },
 
-    /** After the deposit is paid: Booking-Service checks it with Payment-Service and confirms. */
-    async confirmDeposit(bookingId) {
-        return withCustomerName(await request(`/bookings/${encodeURIComponent(bookingId)}/confirm-deposit`, { method: "POST" }));
-    },
-
     /** Upcoming open bookings (today + next days) for technicians to take. */
     async queue({ days = 2 } = {}) {
         return request(`/bookings/queue${query({ days })}`);
