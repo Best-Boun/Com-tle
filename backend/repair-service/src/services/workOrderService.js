@@ -137,6 +137,7 @@ function createWorkOrderService({
             reported_symptom: booking.reported_symptom,
             status: "RECEIVED",
             technician_id: null,
+            intake_terms_acknowledged_at: booking.intake_terms_acknowledged ? createdAt : null,
             received_at: createdAt,
             created_at: createdAt,
             updated_at: createdAt
@@ -299,6 +300,7 @@ function createWorkOrderService({
             serial_number: data.serial_number || null,
             reported_symptom: data.reported_symptom,
             accessories: data.accessories || null,
+            intake_terms_acknowledged_at: data.intake_terms_acknowledged ? createdAt : null,
             device_id: createId(),
             received_at: createdAt,
             created_at: createdAt,
@@ -408,6 +410,9 @@ function createWorkOrderService({
             throw new AppError("Payment Service is unavailable", 503);
         }
         const data = parseInput(handoverSchema, input, "Invalid handover details");
+        if (!data.terms_acknowledged) {
+            throw new AppError("Customer terms acknowledgement is required", 400);
+        }
         if (!await workOrderRepository.findById(workOrderId)) {
             throw new AppError("Work order not found", 404);
         }

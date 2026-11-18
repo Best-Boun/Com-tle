@@ -363,7 +363,7 @@ function createBookingService({
          * then the booking becomes COMPLETED. If Repair fails, the booking stays
          * CONFIRMED and the call can be retried safely (same Idempotency-Key).
          */
-        async checkIn(bookingId, user, { authorization }, { accessories } = {}) {
+        async checkIn(bookingId, user, { authorization }, { accessories, intake_terms_acknowledged } = {}) {
             const booking = await loadBooking(bookingId);
             assertTransition(booking, BOOKING_STATUS.COMPLETED);
 
@@ -383,6 +383,7 @@ function createBookingService({
                     accessories: typeof accessories === "string" ? accessories.trim() || null : null,
                     reported_symptom: booking.reported_symptom,
                     scheduled_at: new Date(booking.scheduled_at).toISOString(),
+                    intake_terms_acknowledged: intake_terms_acknowledged === true,
                     // The technician who took this booking gets the work order.
                     ...(booking.technician_id ? { technician_user_id: booking.technician_id } : {})
                 },

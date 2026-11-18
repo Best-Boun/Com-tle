@@ -145,7 +145,7 @@ function seed() {
             status: "WAITING_APPROVAL", technician_id: "u-tech-1",
             diagnosis: "SSD เสีย อ่านไม่ได้ ทำให้บูตไม่ขึ้น บอร์ดและจอปกติ",
             repair_result: null, test_result: null,
-            handed_over_at: null, handover_exception: null, cancellation: null,
+            handed_over_at: null, handover_terms_acknowledged_at: null, handover_exception: null, cancellation: null,
             created_at: ago(3), updated_at: ago(1)
         },
         {

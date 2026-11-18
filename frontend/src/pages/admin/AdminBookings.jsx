@@ -20,6 +20,7 @@ export default function AdminBookings() {
     const [cancelling, setCancelling] = useState(null);
     const [checkingIn, setCheckingIn] = useState(null);
     const [text, setText] = useState("");
+    const [intakeTermsAcknowledged, setIntakeTermsAcknowledged] = useState(false);
 
     const setFilter = (key, value) => {
         const next = new URLSearchParams(params);
@@ -55,7 +56,7 @@ export default function AdminBookings() {
     const timePassed = (b) => new Date(b.scheduled_at).getTime() <= Date.now();
 
     async function checkIn() {
-        const result = await run(() => api.bookings.checkIn(checkingIn.booking_id, { accessories: text }), L("รับเครื่องและเปิดใบงานแล้ว", "Device received, work order opened")).catch(() => null);
+        const result = await run(() => api.bookings.checkIn(checkingIn.booking_id, { accessories: text, intake_terms_acknowledged: intakeTermsAcknowledged }), L("รับเครื่องและเปิดใบงานแล้ว", "Device received, work order opened")).catch(() => null);
         if (result) navigate(`/admin/work-orders/${result.work_order.work_order_id}`);
     }
 
@@ -104,9 +105,9 @@ export default function AdminBookings() {
                                     <td className="right">
                                         <div className="btn-row" style={{ justifyContent: "flex-end" }}>
                                             {b.status === "PENDING" && <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => confirm(b)}>{L("ยืนยัน", "Confirm")}</button>}
-                                            {b.status === "CONFIRMED" && <button type="button" className="btn btn-primary btn-sm" onClick={() => { setText(""); setCheckingIn(b); }}>{L("รับเครื่อง", "Check in")}</button>}
+                                            {b.status === "CONFIRMED" && <button type="button" className="btn btn-primary btn-sm" onClick={() => { setText(""); setIntakeTermsAcknowledged(false); setCheckingIn(b); }}>{L("รับเครื่อง", "Check in")}</button>}
                                             {isOpen(b) && timePassed(b) && <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setText(""); setNoShow(b); }}>{L("ไม่มาตามนัด", "No-show")}</button>}
-                                            {(isOpen(b) || b.status === "AWAITING_DEPOSIT") && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setText(""); setCancelling(b); }}>{t("common.cancel")}</button>}
+                                            {isOpen(b) && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setText(""); setCancelling(b); }}>{t("common.cancel")}</button>}
                                             {b.work_order_id && <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate(`/admin/work-orders/${b.work_order_id}`)}>{L("ดูใบงาน", "Work order")}</button>}
                                         </div>
                                     </td>
@@ -157,7 +158,7 @@ export default function AdminBookings() {
                     footer={(
                         <>
                             <button type="button" className="btn btn-secondary" onClick={() => setCheckingIn(null)}>{t("common.cancel")}</button>
-                            <button type="button" className="btn btn-primary" disabled={busy} onClick={checkIn}>{L("รับเครื่องและเปิดใบงาน", "Check in & open work order")}</button>
+                            <button type="button" className="btn btn-primary" disabled={busy || !intakeTermsAcknowledged} onClick={checkIn}>{L("รับเครื่องและเปิดใบงาน", "Check in & open work order")}</button>
                         </>
                     )}
                 >
@@ -168,6 +169,10 @@ export default function AdminBookings() {
                             <dt>{L("อาการ", "Symptom")}</dt><dd>{checkingIn.reported_symptom}</dd>
                         </dl>
                         <TextField label={L("อุปกรณ์ที่ลูกค้าฝากไว้", "Accessories left with the device")} placeholder={L("เช่น อะแดปเตอร์ชาร์จ กระเป๋า", "e.g. charger, bag")} value={text} onChange={(e) => setText(e.target.value)} />
+                        <label className="small" style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                            <input type="checkbox" checked={intakeTermsAcknowledged} onChange={(e) => setIntakeTermsAcknowledged(e.target.checked)} />
+                            <span>{L("ลูกค้ารับทราบเงื่อนไขการรับเครื่องและรายการอุปกรณ์ที่ฝากไว้", "The customer acknowledges the intake terms and accessories listed.")}</span>
+                        </label>
                         <p className="small faint">
                             {checkingIn.technician_id
                                 ? L(`ใบงานจะไปหา ${techName(checkingIn.technician_id)} ที่รับงานนี้ไว้`, `The work order goes to ${techName(checkingIn.technician_id)}, who took this job.`)

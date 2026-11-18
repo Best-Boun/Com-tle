@@ -1,0 +1,205 @@
+name: smartfix
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: smartfix
+      MYSQL_DATABASE: smartfix
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -psmartfix --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  keygen:
+    image: node:22-alpine
+    working_dir: /workspace/backend
+    volumes:
+      - ./:/workspace/backend
+    command: ["node", "generate-compose-keys.js"]
+    restart: "no"
+
+  user-service:
+    image: node:22-alpine
+    working_dir: /workspace/backend/user-service
+    volumes:
+      - ./:/workspace/backend
+    environment:
+      PORT: 3001
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: smartfix
+      DB_NAME: user_db
+      JWT_PRIVATE_KEY_PATH: keys/private.pem
+      JWT_ISSUER: user-service
+      JWT_AUDIENCE: com-tle-api
+      INTERNAL_SERVICE_JWT_PUBLIC_KEYS_DIR: keys/internal-public-keys
+      INTERNAL_SERVICE_JWT_ISSUER: user-service
+      INTERNAL_SERVICE_JWT_AUDIENCE: com-tle-internal
+      INTERNAL_SERVICE_JWT_KEY_SERVICES: payment-key-1:payment-service
+    depends_on:
+      mysql:
+        condition: service_healthy
+      keygen:
+        condition: service_completed_successfully
+    command: ["sh", "-c", "npm install --silent && npm start"]
+    ports:
+      - "3001:3001"
+
+  booking-service:
+    image: node:22-alpine
+    working_dir: /workspace/backend/booking-service
+    volumes:
+      - ./:/workspace/backend
+    environment:
+      PORT: 3002
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: smartfix
+      DB_NAME: booking_db
+      CATALOG_SERVICE_URL: http://catalog-service:3003
+      REPAIR_SERVICE_URL: http://repair-service:3004
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: ["sh", "-c", "npm install --silent && npm run migrate && npm start"]
+    ports:
+      - "3002:3002"
+
+  catalog-service:
+    image: node:22-alpine
+    working_dir: /workspace/backend/catalog-service
+    volumes:
+      - ./:/workspace/backend
+    environment:
+      PORT: 3003
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: smartfix
+      DB_NAME: catalog_db
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: ["sh", "-c", "npm install --silent && npm start"]
+    ports:
+      - "3003:3003"
+
+  repair-service:
+    image: node:22-alpine
+    working_dir: /workspace/backend/repair-service
+    volumes:
+      - ./:/workspace/backend
+    environment:
+      PORT: 3004
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: smartfix
+      DB_NAME: repair_db
+      PAYMENT_SERVICE_URL: http://payment-service:3006
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: ["sh", "-c", "npm install --silent && npx knex migrate:latest && npm start"]
+    ports:
+      - "3004:3004"
+
+  inventory-service:
+    image: node:22-alpine
+    working_dir: /workspace/backend/inventory-service
+    volumes:
+      - ./:/workspace/backend
+    environment:
+      PORT: 3005
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: smartfix
+      DB_NAME: inventory_db
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: ["sh", "-c", "npm install --silent && npm start"]
+    ports:
+      - "3005:3005"
+
+  payment-service:
+    image: node:22-alpine
+    working_dir: /workspace/backend/payment-service
+    volumes:
+      - ./:/workspace/backend
+    environment:
+      PORT: 3006
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: smartfix
+      DB_NAME: payment_db
+      PAYMENT_USER_JWT_PUBLIC_KEY_PATH: keys/user-public.pem
+      PAYMENT_USER_JWT_ISSUER: user-service
+      PAYMENT_USER_JWT_AUDIENCE: com-tle-api
+      PAYMENT_INTERNAL_JWT_PRIVATE_KEY_PATH: keys/private.pem
+      PAYMENT_INTERNAL_JWT_KID: payment-key-1
+      PAYMENT_INTERNAL_JWT_ISSUER: payment-service
+      PAYMENT_INTERNAL_JWT_AUDIENCE: com-tle-internal
+    depends_on:
+      mysql:
+        condition: service_healthy
+      keygen:
+        condition: service_completed_successfully
+    command: ["sh", "-c", "npm install --silent && npm start"]
+    ports:
+      - "3006:3006"
+
+  api-gateway:
+    image: node:22-alpine
+    working_dir: /workspace/backend/api-gateway
+    volumes:
+      - ./:/workspace/backend
+    environment:
+      PORT: 3000
+      JWT_PUBLIC_KEY_PATH: keys/public.pem
+      JWT_ISSUER: user-service
+      JWT_AUDIENCE: com-tle-api
+      USER_SERVICE_URL: http://user-service:3001
+      BOOKING_SERVICE_URL: http://booking-service:3002
+      CATALOG_SERVICE_URL: http://catalog-service:3003
+      REPAIR_SERVICE_URL: http://repair-service:3004
+      INVENTORY_SERVICE_URL: http://inventory-service:3005
+      PAYMENT_SERVICE_URL: http://payment-service:3006
+    depends_on:
+      - user-service
+      - booking-service
+      - catalog-service
+      - repair-service
+      - inventory-service
+      - payment-service
+      - keygen
+    command: ["sh", "-c", "npm install --silent && npm start"]
+    ports:
+      - "3000:3000"
+
+  frontend:
+    image: node:22-alpine
+    working_dir: /workspace/frontend
+    volumes:
+      - ../frontend:/workspace/frontend
+    environment:
+      VITE_USE_MOCK: "false"
+    command: ["sh", "-c", "npm install --silent && npm run dev -- --host 0.0.0.0"]
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api-gateway
+
+volumes:
+  mysql_data:

@@ -7,16 +7,13 @@
  *   CANCELLED        – cancelled by the customer before the appointment, or by the shop
  *   NO_SHOW          – the customer did not come; the shop marks it after the
  *                      appointment time, so it can be counted per customer
- *   AWAITING_DEPOSIT – legacy only: left by the removed booking-deposit feature.
- *                      Such a booking holds no slot and can only be cancelled.
  */
 const BOOKING_STATUS = Object.freeze({
     PENDING: "PENDING",
     CONFIRMED: "CONFIRMED",
     CANCELLED: "CANCELLED",
     COMPLETED: "COMPLETED",
-    NO_SHOW: "NO_SHOW",
-    AWAITING_DEPOSIT: "AWAITING_DEPOSIT"
+    NO_SHOW: "NO_SHOW"
 });
 
 // Statuses that still occupy an appointment slot.
@@ -38,8 +35,7 @@ const ALLOWED_TRANSITIONS = Object.freeze({
     [BOOKING_STATUS.CONFIRMED]: [BOOKING_STATUS.COMPLETED, BOOKING_STATUS.CANCELLED, BOOKING_STATUS.NO_SHOW],
     [BOOKING_STATUS.COMPLETED]: [],
     [BOOKING_STATUS.CANCELLED]: [],
-    [BOOKING_STATUS.NO_SHOW]: [],
-    [BOOKING_STATUS.AWAITING_DEPOSIT]: [BOOKING_STATUS.CANCELLED]
+    [BOOKING_STATUS.NO_SHOW]: []
 });
 
 module.exports = {

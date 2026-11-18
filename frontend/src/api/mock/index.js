@@ -547,9 +547,10 @@ export const bookings = {
     }),
 
     /** Customer arrived: create the Work Order (1 booking = 1 work order) and complete the booking. */
-    checkIn: handler(async (bookingId, { accessories } = {}) => {
+    checkIn: handler(async (bookingId, { accessories, intake_terms_acknowledged } = {}) => {
         const user = requireRole("ADMIN");
         const b = loadBooking(bookingId, user);
+        if (!intake_terms_acknowledged) throw bad("ลูกค้าต้องรับทราบเงื่อนไขการรับเครื่อง", "Customer intake terms acknowledgement is required");
         if (!OPEN_BOOKING.includes(b.status)) throw bad("การจองนี้ปิดไปแล้ว", "This booking is no longer open", 409);
         if (b.work_order_id) throw bad("การจองนี้มีใบงานแล้ว", "This booking already has a work order", 409);
         const wo = createWorkOrder({
@@ -565,7 +566,8 @@ export const bookings = {
             model: b.model,
             serial_number: b.serial_number,
             reported_symptom: b.reported_symptom,
-            accessories: accessories?.trim() || null
+            accessories: accessories?.trim() || null,
+            intake_terms_acknowledged_at: now()
         }, user, "รับเครื่องจากการจอง " + b.booking_number);
         // The technician who took this booking gets the work order straight away.
         const tech = b.technician_id && getDb().users.find((u) => u.user_id === b.technician_id && has(u, "TECHNICIAN"));
@@ -746,6 +748,7 @@ export const repairs = {
         const user = requireRole("ADMIN");
         if (!input.customer_name?.trim() || !input.customer_phone?.trim()) throw bad("กรอกชื่อและเบอร์โทรลูกค้า", "Customer name and phone are required");
         if (!input.device_type?.trim() || !input.reported_symptom?.trim()) throw bad("กรอกประเภทเครื่องและอาการ", "Device type and symptom are required");
+        if (!input.intake_terms_acknowledged) throw bad("ลูกค้าต้องรับทราบเงื่อนไขการรับเครื่อง", "Customer intake terms acknowledgement is required");
         const service = getDb().services.find((s) => s.service_id === input.service_id);
         const wo = createWorkOrder({
             source: "WALK_IN",
@@ -760,7 +763,8 @@ export const repairs = {
             model: input.model?.trim() || null,
             serial_number: input.serial_number?.trim() || null,
             reported_symptom: input.reported_symptom.trim(),
-            accessories: input.accessories?.trim() || null
+            accessories: input.accessories?.trim() || null,
+            intake_terms_acknowledged_at: now()
         }, user, "Walk-in");
         return respond(presentWo(wo), 350);
     }),
@@ -917,9 +921,10 @@ export const repairs = {
     }),
 
     /** Normal: completed + tested + fully paid. Otherwise admin must approve an exception with a reason. */
-    handover: handler(async (woId, { exceptionReason } = {}) => {
+    handover: handler(async (woId, { exceptionReason, terms_acknowledged } = {}) => {
         const user = requireRole("ADMIN");
         const wo = loadWo(woId, user);
+        if (!terms_acknowledged) throw bad("ลูกค้าต้องรับทราบเงื่อนไขตอนรับเครื่องคืน", "Customer handover terms acknowledgement is required");
         if (wo.handed_over_at) throw bad("ส่งมอบเครื่องไปแล้ว", "Already handed over", 409);
         if (wo.status !== "COMPLETED" || !wo.test_result?.passed) throw bad("ต้องซ่อมเสร็จและทดสอบผ่านก่อนส่งมอบ", "The repair must be completed and tested first", 409);
         const pay = paymentSummary(woId);
@@ -928,6 +933,7 @@ export const repairs = {
             wo.handover_exception = { approved_by: user.user_id, approved_by_name: user.full_name, reason: exceptionReason.trim(), outstanding: pay.balance, at: now() };
         }
         wo.handed_over_at = now();
+        wo.handover_terms_acknowledged_at = now();
         wo.updated_at = now();
         getDb().workOrderHistory.push({ id: newId(), work_order_id: wo.work_order_id, old_status: wo.status, new_status: wo.status, changed_by: user.user_id, note: pay.balance > 0 ? `ส่งมอบเครื่อง (ข้อยกเว้น ค้าง ${pay.balance} บาท)` : "ส่งมอบเครื่องแล้ว", created_at: now() });
         return respond(presentWo(wo, { detail: true }));

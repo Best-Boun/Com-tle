@@ -212,14 +212,14 @@ test("handover checks the verified payment balance and requires an exception rea
     const admin = { userId: ADMIN_ID, roles: ["ADMIN"] };
 
     await assert.rejects(
-        service.handover(BOOKING_ID, {}, admin, "Bearer token"),
+        service.handover(BOOKING_ID, { terms_acknowledged: true }, admin, "Bearer token"),
         { statusCode: 409 }
     );
     assert.equal(handoverArguments, null);
 
     const result = await service.handover(
         BOOKING_ID,
-        { exceptionReason: "Customer will pay tomorrow" },
+        { exceptionReason: "Customer will pay tomorrow", terms_acknowledged: true },
         admin,
         "Bearer token"
     );
@@ -246,7 +246,7 @@ test("handover returns not found without querying payment for a missing work ord
     });
 
     await assert.rejects(
-        service.handover(BOOKING_ID, {}, {
+        service.handover(BOOKING_ID, { terms_acknowledged: true }, {
             userId: ADMIN_ID,
             roles: ["ADMIN"]
         }, "Bearer token"),
