@@ -3,27 +3,28 @@ import { Link, useParams } from "react-router-dom";
 import { useI18n } from "../../i18n/I18nProvider.jsx";
 import { api } from "../../api/index.js";
 import { useAsync } from "../../utils/useAsync.js";
-import { ErrorNotice, Loading, Modal, Money, Stamp, TextField, useAction } from "../../components/ui.jsx";
-import { PaymentSummary, QuotationCard, RepairProgress, WoHistory, deviceLabel } from "../../components/repair.jsx";
+import { ErrorNotice, Loading, Money, Stamp, useAction } from "../../components/ui.jsx";
+import { OptionPicker, PaymentSummary, PickupNote, QuotationCard, RepairProgress, WoHistory, deviceLabel } from "../../components/repair.jsx";
 import Checkout from "../../components/Checkout.jsx";
 
 export default function RepairDetail() {
     const { workOrderId } = useParams();
     const { L, t, fmt } = useI18n();
     const wo = useAsync(() => api.repairs.get(workOrderId), [workOrderId]);
-    const [rejecting, setRejecting] = useState(null);
-    const [note, setNote] = useState("");
     const [paying, setPaying] = useState(false);
     const [run, busy] = useAction();
 
-    async function decide(quotation, approve) {
+    async function choose(quotation, option, note) {
+        const message = option.kind === "NO_REPAIR"
+            ? L("รับทราบ ไม่ซ่อม มารับเครื่องคืนได้เลย", "Noted — no repair. You can collect your device.")
+            : option.kind === "SKIP_EXTRA"
+                ? L("รับทราบ ร้านจะซ่อมต่อตามเดิม", "Noted — the shop carries on as agreed.")
+                : L("ยืนยันแล้ว ร้านจะเริ่มซ่อม", "Confirmed — the shop will start the repair");
         const updated = await run(
-            () => api.repairs.decideQuotation(quotation.quotation_id, { approve, note }),
-            approve ? L("อนุมัติแล้ว ร้านจะเริ่มซ่อม", "Approved — the shop will start the repair") : L("ส่งคำตอบให้ร้านแล้ว", "Sent to the shop")
+            () => api.repairs.decideQuotation(quotation.quotation_id, { option_id: option.option_id, note: note.trim() || null }),
+            message
         ).catch(() => null);
         if (updated) wo.setData(updated);
-        setRejecting(null);
-        setNote("");
     }
 
     if (wo.loading && !wo.data) return <Loading />;
@@ -46,14 +47,21 @@ export default function RepairDetail() {
                 <Stamp kind="wo" status={shownStatus} />
             </div>
 
-            <RepairProgress status={w.status} handedOver={Boolean(w.handed_over_at)} />
+            <RepairProgress status={w.status} handedOver={Boolean(w.handed_over_at)} declined={w.repair_declined} />
 
             {pending.length > 0 && (
                 <div className="notice warn" role="status">
-                    {L("ร้านส่งใบเสนอราคามาแล้ว กรุณาตรวจสอบและอนุมัติก่อนร้านเริ่มซ่อม", "The shop sent a quotation. Please review and approve it so the repair can start.")}
+                    {L("ช่างตรวจเสร็จแล้ว อ่านผลตรวจแล้วเลือก 1 ตัวเลือกด้านล่าง ร้านจะเริ่มซ่อมเมื่อคุณเลือก", "The technician has checked your device. Read the result and pick one option below; the repair starts once you choose.")}
                 </div>
             )}
-            {w.status === "COMPLETED" && !w.handed_over_at && (
+            {w.status === "COMPLETED" && !w.handed_over_at && w.repair_declined && (
+                <div className="notice ok">
+                    {w.payment.balance > 0
+                        ? L(`คุณเลือกไม่ซ่อม มารับเครื่องคืนได้ที่ร้าน ค่าตรวจเช็ก ${fmt.money(w.payment.balance)}`, `You chose not to repair. Collect your device at the shop; the inspection fee is ${fmt.money(w.payment.balance)}.`)
+                        : L("คุณเลือกไม่ซ่อม มารับเครื่องคืนได้ที่ร้าน", "You chose not to repair. Collect your device at the shop.")}
+                </div>
+            )}
+            {w.status === "COMPLETED" && !w.handed_over_at && !w.repair_declined && (
                 <div className="notice ok">
                     {w.payment.unavailable
                         ? L("ซ่อมเสร็จและทดสอบแล้ว ติดต่อร้านเพื่อรับเครื่องได้เลย", "Repair done and tested — contact the shop to pick up your device.")
@@ -62,9 +70,13 @@ export default function RepairDetail() {
                         : L("ซ่อมเสร็จและทดสอบแล้ว มารับเครื่องได้ที่ร้าน", "Repair done and tested — ready for pick-up.")}
                 </div>
             )}
+            <PickupNote workOrder={w} />
+            {w.status === "WAITING_PARTS" && (
+                <div className="notice info">{L("ร้านกำลังรออะไหล่ จะเริ่มซ่อมทันทีที่อะไหล่มาถึง", "The shop is waiting for parts and will start as soon as they arrive.")}</div>
+            )}
             {canPayOnline && pending.length === 0 && (
                 <div className="notice info pay-cta" role="status">
-                    <span>{L(`ใบเสนอราคาอนุมัติแล้ว ยอดที่ต้องชำระ ${fmt.money(w.payment.balance)} ชำระออนไลน์ได้เลย`, `Quotation approved. ${fmt.money(w.payment.balance)} is due — you can pay online now.`)}</span>
+                    <span>{L(`ยอดที่ต้องชำระ ${fmt.money(w.payment.balance)} ชำระออนไลน์ได้เลย`, `${fmt.money(w.payment.balance)} is due — you can pay online now.`)}</span>
                     <button type="button" className="btn btn-primary btn-sm" onClick={() => setPaying(true)}>{L("ชำระเงิน", "Pay now")}</button>
                 </div>
             )}
@@ -73,23 +85,33 @@ export default function RepairDetail() {
             <div className="split">
                 <div className="stack-lg">
                     <section className="stack">
-                        <h2>{L("ใบเสนอราคา", "Quotations")}</h2>
+                        <h2>{L("ผลตรวจและตัวเลือก", "Diagnosis and options")}</h2>
+                        {w.diagnosis && <p className="notice info" style={{ margin: 0 }}><strong>{L("ผลตรวจ:", "Diagnosis:")}</strong> {w.diagnosis}</p>}
                         {w.quotations.filter((q) => q.status !== "DRAFT").length === 0 && (
                             <p className="muted">{w.status === "PENDING"
-                                ? L("ร้านรับเครื่องแล้ว รอช่างเริ่มตรวจเช็ก ใบเสนอราคาจะส่งมาให้อนุมัติที่นี่", "Your device is in. A technician will start checking it; the quotation will appear here.")
-                                : L("ช่างกำลังตรวจเช็ก ร้านจะส่งใบเสนอราคามาให้อนุมัติที่นี่", "The technician is checking your device. The quotation will appear here.")}</p>
+                                ? L("ร้านรับเครื่องแล้ว รอช่างเริ่มตรวจเช็ก ตัวเลือกพร้อมราคาจะส่งมาที่นี่", "Your device is in. A technician will start checking it; priced options will appear here.")
+                                : L("ช่างกำลังตรวจเช็ก ตัวเลือกพร้อมราคาจะส่งมาที่นี่ และแจ้งทางอีเมล", "The technician is checking your device. Priced options will appear here.")}</p>
                         )}
                         {w.quotations.filter((q) => q.status !== "DRAFT").map((q) => (
-                            <QuotationCard key={q.quotation_id} quotation={q} superseded={q.status === "REJECTED"}>
-                                {q.status === "SENT" && (
-                                    <div className="btn-row">
-                                        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => decide(q, true)}>
-                                            {L("อนุมัติ", "Approve")} <Money value={q.total} />
-                                        </button>
-                                        <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => setRejecting(q)}>{L("ไม่อนุมัติ", "Reject")}</button>
+                            q.status === "SENT" && q.options?.length > 0 ? (
+                                <section key={q.quotation_id} className="quote is-sent">
+                                    <header className="quote-head">
+                                        <strong>{t(`quote.kind.${q.kind}`)} Rev.{q.revision}</strong>
+                                        <span className="small faint">{L("เลือก 1 ตัวเลือก", "Pick one option")}</span>
+                                    </header>
+                                    <div className="quote-body">
+                                        {q.note && <p className="small">{q.note}</p>}
+                                        <OptionPicker
+                                            quotation={q}
+                                            busy={busy}
+                                            onChoose={(option, note) => choose(q, option, note)}
+                                            noteLabel={L("ข้อความถึงร้าน (ไม่บังคับ)", "Message to the shop (optional)")}
+                                        />
                                     </div>
-                                )}
-                            </QuotationCard>
+                                </section>
+                            ) : (
+                                <QuotationCard key={q.quotation_id} quotation={q} superseded={q.status === "REJECTED"} />
+                            )
                         ))}
                     </section>
 
@@ -138,23 +160,6 @@ export default function RepairDetail() {
                 <Checkout workOrder={w} onClose={() => setPaying(false)} onPaid={(updated) => wo.setData(updated)} />
             )}
 
-            {rejecting && (
-                <Modal
-                    title={L(`ไม่อนุมัติ Rev.${rejecting.revision}?`, `Reject Rev.${rejecting.revision}?`)}
-                    onClose={() => setRejecting(null)}
-                    footer={(
-                        <>
-                            <button type="button" className="btn btn-secondary" onClick={() => setRejecting(null)}>{t("common.cancel")}</button>
-                            <button type="button" className="btn btn-danger" disabled={busy} onClick={() => decide(rejecting, false)}>{L("ไม่อนุมัติ", "Reject")}</button>
-                        </>
-                    )}
-                >
-                    <div className="stack">
-                        <p className="muted small">{L("ร้านจะติดต่อกลับและอาจส่งใบเสนอราคาฉบับใหม่ ใบเดิมจะถูกเก็บไว้เป็นประวัติ", "The shop may send a new revision. This one stays in the history.")}</p>
-                        <TextField as="textarea" label={L("บอกร้านว่าอยากปรับอะไร", "Tell the shop what you'd like changed")} value={note} onChange={(e) => setNote(e.target.value)} placeholder={L("เช่น ขอเป็น SSD 512GB แทน", "e.g. could you use a 512GB SSD instead?")} />
-                    </div>
-                </Modal>
-            )}
         </div>
     );
 }

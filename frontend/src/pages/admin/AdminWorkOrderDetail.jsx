@@ -4,41 +4,12 @@ import { useI18n } from "../../i18n/I18nProvider.jsx";
 import { api } from "../../api/index.js";
 import { useAsync } from "../../utils/useAsync.js";
 import { ErrorNotice, Loading, Modal, Money, Stamp, TextField, useAction } from "../../components/ui.jsx";
-import { PaymentSummary, QuotationCard, RepairProgress, WoHistory, deviceLabel } from "../../components/repair.jsx";
-import ItemsEditor, { itemsValid, toPayload } from "../../components/ItemsEditor.jsx";
+import { OptionPicker, PaymentSummary, PickupNote, QuotationCard, RepairProgress, WoHistory, deviceLabel } from "../../components/repair.jsx";
 import RefundRequests, { OPEN_REFUND } from "../../components/RefundRequests.jsx";
 import "./admin.css";
 
-const OPEN = ["PENDING", "DIAGNOSING", "WAITING_APPROVAL", "APPROVED", "REPAIRING", "TESTING"];
+const OPEN = ["PENDING", "DIAGNOSING", "WAITING_APPROVAL", "APPROVED", "WAITING_PARTS", "REPAIRING", "TESTING"];
 const PAYMENT_POLL_MS = 8000;
-
-/** Admin prices a technician's draft and sends it to the customer. */
-function PriceDraft({ draft, parts, busy, onSend }) {
-    const { L, t } = useI18n();
-    const [items, setItems] = useState([]);
-    const [note, setNote] = useState(draft.note || "");
-
-    useEffect(() => {
-        setItems(draft.items.map((i) => {
-            const part = parts.find((p) => p.part_id === i.part_id);
-            return { ...i, key: i.item_id, unit_price: i.unit_price || (part ? part.unit_price : "") };
-        }));
-    }, [draft.quotation_id, parts.length]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    return (
-        <section className="action-panel">
-            <h2>{L(`ตั้งราคา ${t(`quote.kind.${draft.kind}`)} Rev.${draft.revision}`, `Price ${t(`quote.kind.${draft.kind}`)} Rev.${draft.revision}`)}</h2>
-            <p className="muted small">{L("ช่างเสนอรายการมาแล้ว ตรวจสอบ ใส่ราคา แล้วส่งให้ลูกค้าอนุมัติ", "The technician proposed these items. Check them, add prices and send to the customer.")}</p>
-            <ItemsEditor items={items} onChange={setItems} parts={parts} withPrice />
-            <TextField as="textarea" label={L("ข้อความถึงลูกค้า", "Message to the customer")} value={note} onChange={(e) => setNote(e.target.value)} />
-            <div>
-                <button type="button" className="btn btn-primary" disabled={busy || !itemsValid(items, true)} onClick={() => onSend(toPayload(items), note)}>
-                    {L("ส่งใบเสนอราคาให้ลูกค้า", "Send quotation to customer")}
-                </button>
-            </div>
-        </section>
-    );
-}
 
 export default function AdminWorkOrderDetail() {
     const { workOrderId } = useParams();
@@ -48,7 +19,7 @@ export default function AdminWorkOrderDetail() {
     const parts = useAsync(() => api.inventory.listParts(), []);
     const refunds = useAsync(() => api.payments.listRefunds({ work_order_id: workOrderId }), [workOrderId]);
     const [run, busy] = useAction();
-    const [modal, setModal] = useState(null); // "pay" | "refund" | "handover" | "cancel" | {decide: quotation}
+    const [modal, setModal] = useState(null); // "pay" | "refund" | "handover" | "cancel"
     const [form, setForm] = useState({});
 
     async function act(fn, message) {
@@ -94,11 +65,10 @@ export default function AdminWorkOrderDetail() {
     if (wo.error) return <ErrorNotice error={wo.error} onRetry={wo.reload} />;
     const w = wo.data;
     const isOpen = OPEN.includes(w.status);
-    const draft = w.quotations.find((q) => q.status === "DRAFT");
     const sent = w.quotations.filter((q) => q.status === "SENT");
-    const rejectedToRevise = w.quotations.filter((q) => q.status === "REJECTED" && !w.quotations.some((x) => x.kind === q.kind && x.revision > q.revision));
-    const issuable = ["APPROVED", "REPAIRING", "TESTING"].includes(w.status) ? w.parts.filter((p) => p.remaining_qty > 0) : [];
-    const canHandover = w.status === "COMPLETED" && w.test_result?.passed && !w.handed_over_at;
+    const issuable = ["APPROVED", "WAITING_PARTS", "REPAIRING", "TESTING"].includes(w.status) ? w.parts.filter((p) => p.remaining_qty > 0) : [];
+    // A device the customer chose not to repair goes back without a test.
+    const canHandover = w.status === "COMPLETED" && (w.test_result?.passed || w.repair_declined) && !w.handed_over_at;
     const refundList = refunds.data || [];
     const reserved = refundList.filter((r) => OPEN_REFUND.includes(r.status)).reduce((s, r) => s + r.amount, 0);
     const refundable = Math.max(0, w.payment.net_paid - reserved);
@@ -116,45 +86,35 @@ export default function AdminWorkOrderDetail() {
                 <Stamp kind="wo" status={w.handed_over_at ? "HANDED_OVER" : w.status} />
             </div>
 
-            <RepairProgress status={w.status} handedOver={Boolean(w.handed_over_at)} />
+            <RepairProgress status={w.status} handedOver={Boolean(w.handed_over_at)} declined={w.repair_declined} />
 
             <div className="split">
                 <div className="stack-lg">
-                    {draft && <PriceDraft draft={draft} parts={parts.data || []} busy={busy} onSend={(items, note) => act(() => api.repairs.priceAndSend(draft.quotation_id, { items, note }), L("ส่งใบเสนอราคาแล้ว", "Quotation sent"))} />}
-
                     {sent.map((q) => (
                         <section key={q.quotation_id} className={`action-panel ${w.source === "WALK_IN" ? "" : "calm"}`}>
-                            <h2>{L(`รอลูกค้าตอบ ${t(`quote.kind.${q.kind}`)} Rev.${q.revision}`, `Waiting on ${t(`quote.kind.${q.kind}`)} Rev.${q.revision}`)} · <Money value={q.total} /></h2>
-                            {w.source === "WALK_IN" ? (
+                            <h2>{L(`รอลูกค้าเลือก ${t(`quote.kind.${q.kind}`)} Rev.${q.revision}`, `Waiting on ${t(`quote.kind.${q.kind}`)} Rev.${q.revision}`)}</h2>
+                            {w.source === "WALK_IN" && q.options?.length > 0 ? (
                                 <>
-                                    <p className="muted small">{L("ลูกค้า Walk-in ไม่มีบัญชี ให้บันทึกคำตอบแทนลูกค้าเมื่อตกลงที่หน้าร้านหรือทางโทรศัพท์", "Walk-in customers have no account. Record their answer here once they agree in person or by phone.")}</p>
-                                    <div className="btn-row">
-                                        <button type="button" className="btn btn-primary" onClick={() => { setForm({ approve: true, note: "" }); setModal({ decide: q }); }}>{L("ลูกค้าอนุมัติ", "Customer approved")}</button>
-                                        <button type="button" className="btn btn-secondary" onClick={() => { setForm({ approve: false, note: "" }); setModal({ decide: q }); }}>{L("ลูกค้าไม่อนุมัติ", "Customer rejected")}</button>
-                                    </div>
+                                    <p className="muted small">{L("ลูกค้า walk-in ไม่มีบัญชี บันทึกตัวเลือกที่ลูกค้าเลือกที่หน้าร้านหรือทางโทรศัพท์", "Walk-in customers have no account. Record the option they chose in person or by phone.")}</p>
+                                    <OptionPicker
+                                        quotation={q}
+                                        busy={busy}
+                                        confirmLabel={L("บันทึกว่าลูกค้าเลือกตัวเลือกนี้", "Record the customer's choice")}
+                                        noteLabel={L("รายละเอียด (เช่น ช่องทางที่ลูกค้าตอบ)", "Details (e.g. how the customer answered)")}
+                                        onChoose={(option, note) => act(
+                                            () => api.repairs.decideQuotation(q.quotation_id, { option_id: option.option_id, note: note.trim() || L("ลูกค้า walk-in ตอบที่หน้าร้าน", "Walk-in customer answered in person") }),
+                                            L("บันทึกตัวเลือกแล้ว", "Choice recorded")
+                                        )}
+                                    />
                                 </>
                             ) : (
-                                <p className="muted small">{L("ลูกค้าที่จองผ่านระบบต้องกดอนุมัติเองในหน้าติดตามงานซ่อม", "Customers who booked online approve it themselves from their tracking page.")}</p>
+                                <>
+                                    <p className="muted small">{L("ลูกค้าที่มีบัญชีเลือกเองในหน้าติดตามงานซ่อม และได้รับอีเมลแจ้งแล้ว", "Customers with an account choose from their tracking page.")}</p>
+                                    <QuotationCard quotation={q} />
+                                </>
                             )}
                         </section>
                     ))}
-
-                    {rejectedToRevise.length > 0 && !draft && sent.length === 0 && isOpen && (
-                        <section className="action-panel">
-                            <h2>{L("ลูกค้าไม่อนุมัติราคา", "The customer rejected the quotation")}</h2>
-                            {rejectedToRevise.map((q) => (
-                                <div key={q.quotation_id} className="stack" style={{ gap: 8 }}>
-                                    <p className="small">{L("เหตุผล:", "Reason:")} {q.decision_note || "—"}</p>
-                                    <div>
-                                        <button type="button" className="btn btn-primary" disabled={busy} onClick={() => act(() => api.repairs.reviseQuotation(q.quotation_id), L("สร้างฉบับแก้ไขแล้ว", "New revision created"))}>
-                                            {L(`สร้างฉบับแก้ไข Rev.${q.revision + 1}`, `Create Rev.${q.revision + 1}`)}
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                            <p className="faint small">{L("ฉบับเดิมจะไม่ถูกแก้ทับ เก็บไว้เป็นประวัติราคา", "The old revision is kept as price history — never overwritten.")}</p>
-                        </section>
-                    )}
 
                     {issuable.length > 0 && (
                         <section className="action-panel">
@@ -189,9 +149,11 @@ export default function AdminWorkOrderDetail() {
                             {paymentDown ? (
                                 <div className="notice warn">{L("ตรวจยอดชำระไม่ได้เพราะระบบการเงินไม่พร้อม ส่งมอบได้เมื่อระบบกลับมา (หน้านี้จะอัปเดตเอง)", "Payments can't be checked while the payment system is down. Hand over once it is back (this page updates by itself).")}</div>
                             ) : (<>
+                            <PickupNote workOrder={w} />
+                            {w.repair_declined && <p className="small">{L("ลูกค้าเลือกไม่ซ่อม เก็บค่าตรวจเช็กแล้วคืนเครื่อง", "The customer chose not to repair: take the inspection fee and return the device.")}</p>}
                             {w.payment.balance > 0
                                 ? <div className="notice warn">{L(`ยังค้างชำระ ${fmt.money(w.payment.balance)} ต้องรับชำระให้ครบ หรือให้ Admin อนุมัติข้อยกเว้นพร้อมเหตุผล`, `${fmt.money(w.payment.balance)} still due. Take payment first, or approve an exception with a reason.`)}</div>
-                                : <p className="muted small">{L("ซ่อมเสร็จ ทดสอบผ่าน และชำระครบแล้ว", "Repaired, tested and fully paid.")}</p>}
+                                : <p className="muted small">{w.repair_declined ? L("ชำระครบแล้ว", "Fully paid.") : L("ซ่อมเสร็จ ทดสอบผ่าน และชำระครบแล้ว", "Repaired, tested and fully paid.")}</p>}
                             <div className="btn-row">
                                 {w.payment.balance > 0 && <button type="button" className="btn btn-primary" onClick={() => { setForm({ amount: String(w.payment.balance), method: "CASH" }); setModal("pay"); }}>{L("รับชำระเงิน", "Take payment")}</button>}
                                 <button type="button" className={`btn ${w.payment.balance > 0 ? "btn-secondary" : "btn-primary"}`} onClick={() => { setForm({ reason: "", termsAcknowledged: false }); setModal("handover"); }}>
@@ -382,18 +344,6 @@ export default function AdminWorkOrderDetail() {
                 </Modal>
             )}
 
-            {modal?.decide && (
-                <Modal title={form.approve ? L("บันทึกว่าลูกค้าอนุมัติ", "Record approval") : L("บันทึกว่าลูกค้าไม่อนุมัติ", "Record rejection")} onClose={() => setModal(null)} footer={(
-                    <>
-                        <button type="button" className="btn btn-secondary" onClick={() => setModal(null)}>{t("common.cancel")}</button>
-                        <button type="button" className={`btn ${form.approve ? "btn-primary" : "btn-danger"}`} disabled={busy} onClick={() => act(() => api.repairs.decideQuotation(modal.decide.quotation_id, { approve: form.approve, note: form.note || L("ลูกค้า walk-in ตอบที่หน้าร้าน", "Walk-in customer answered in person") }), L("บันทึกแล้ว", "Saved"))}>
-                            {form.approve ? L("อนุมัติ", "Approve") : L("ไม่อนุมัติ", "Reject")} <Money value={modal.decide.total} />
-                        </button>
-                    </>
-                )}>
-                    <TextField as="textarea" label={L("รายละเอียด (เช่น ช่องทางที่ลูกค้าตอบ)", "Details (e.g. how the customer answered)")} value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
-                </Modal>
-            )}
         </div>
     );
 }

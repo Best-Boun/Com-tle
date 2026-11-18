@@ -42,6 +42,7 @@ const listWorkOrdersSchema = z.object({
         "DIAGNOSING",
         "WAITING_APPROVAL",
         "APPROVED",
+        "WAITING_PARTS",
         "REPAIRING",
         "TESTING",
         "COMPLETED",
@@ -89,23 +90,26 @@ function validatePartReferences(items, context) {
         }
     });
 }
-const proposeItemsSchema = z.object({
-    items: z.array(quotationItemSchema).min(1).max(100),
-    note: nullableText(1000)
-}).strict().superRefine((data, context) => {
-    validatePartReferences(data.items, context);
-});
-const priceAndSendSchema = z.object({
+const optionSchema = z.object({
+    title: z.string().trim().min(1).max(200),
+    description: nullableText(2000),
     items: z.array(quotationItemSchema.extend({
-        unit_price: z.coerce.number().int().min(0).max(1000000000)
-    })).min(1).max(100),
-    note: nullableText(1000)
-}).strict().superRefine((data, context) => {
-    validatePartReferences(data.items, context);
+        unit_price: requiredNumber(z.number().int().min(0).max(1000000000))
+    })).min(1).max(50)
+}).strict().superRefine((option, context) => {
+    validatePartReferences(option.items, context);
 });
+// A technician sends 1-5 priced options; the system adds the "no repair" one.
+const quotationOptionsSchema = z.object({
+    options: z.array(optionSchema).min(1).max(5),
+    note: nullableText(2000)
+}).strict();
 const decisionSchema = z.object({
-    approve: z.boolean(),
+    option_id: z.string().uuid(),
     note: nullableText(1000)
+}).strict();
+const waitPartsSchema = z.object({
+    note: z.string().trim().min(1).max(1000)
 }).strict();
 const testResultSchema = z.object({
     passed: z.boolean(),
@@ -144,9 +148,9 @@ module.exports = {
     assignTechnicianSchema,
     createWalkInSchema,
     diagnosisSchema,
-    proposeItemsSchema,
-    priceAndSendSchema,
+    quotationOptionsSchema,
     decisionSchema,
+    waitPartsSchema,
     testResultSchema,
     handoverSchema,
     cancelSchema,
@@ -154,4 +158,4 @@ module.exports = {
     receivePartSchema,
     issuePartSchema,
     partMovementQuerySchema
-};
+};
