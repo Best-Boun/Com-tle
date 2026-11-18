@@ -235,6 +235,32 @@ function createWorkOrderService({
         return items.map((item) => present(item));
     }
 
+    /** Received devices nobody has taken yet, for technicians to pick from (task 8). */
+    async function listQueue(user) {
+        if (!hasPermission(user, PERMISSIONS.REPAIR_HISTORY_VIEW_ASSIGNED)
+            && !hasPermission(user, PERMISSIONS.WORK_ORDER_ASSIGN_TECHNICIAN)) {
+            throw new AppError("You do not have permission", 403);
+        }
+        const items = await workOrderRepository.listUnassigned();
+        return items.map((item) => present(item));
+    }
+
+    /** A technician takes a job from the queue: first come, first served. */
+    async function claim(workOrderId, user) {
+        requirePermission(user, PERMISSIONS.DIAGNOSIS_RECORD);
+        const result = await workOrderRepository.assignTechnician(workOrderId, user.userId, { onlyIfFree: true });
+        if (result.notFound) {
+            throw new AppError("Work order not found", 404);
+        }
+        if (result.taken) {
+            throw new AppError("Another technician has already taken this job", 409);
+        }
+        if (result.closed || result.notInQueue) {
+            throw new AppError("This job is no longer in the queue", 409);
+        }
+        return present(result.workOrder);
+    }
+
     async function assignTechnician(workOrderId, input, user) {
         const parsed = assignTechnicianSchema.safeParse(input);
         if (!parsed.success) {
@@ -598,6 +624,8 @@ function createWorkOrderService({
         createWalkIn,
         listMine,
         listAssigned,
+        listQueue,
+        claim,
         assignTechnician,
         listAll,
         get,

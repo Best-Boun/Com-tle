@@ -507,7 +507,21 @@ function createWorkOrderRepository(db) {
             return rows.map(presentRow);
         },
 
-        async assignTechnician(workOrderId, technicianUserId) {
+        /** The technicians' queue: received devices nobody has taken yet, oldest first. */
+        async listUnassigned() {
+            const rows = await workOrderQuery(db)
+                .whereNull("wa.technician_user_id")
+                .where("wo.status", "RECEIVED")
+                .orderBy([{ column: "wo.received_at", order: "asc" }, { column: "wo.created_at", order: "asc" }]);
+            return rows.map(presentRow);
+        },
+
+        /**
+         * onlyIfFree: a technician taking a job from the queue. It succeeds only
+         * while nobody holds the job and it is still RECEIVED, so two technicians
+         * cannot both get it (the row lock serialises them).
+         */
+        async assignTechnician(workOrderId, technicianUserId, { onlyIfFree = false } = {}) {
             return db.transaction(async (trx) => {
                 const workOrder = await trx("work_orders")
                     .where({ work_order_id: workOrderId })
@@ -527,6 +541,12 @@ function createWorkOrderRepository(db) {
                 if (activeAssignments.length === 1
                     && activeAssignments[0].technician_user_id === technicianUserId) {
                     return { workOrder: await loadWorkOrderDetails(trx, workOrderId) };
+                }
+                if (onlyIfFree && activeAssignments.length > 0) {
+                    return { taken: true };
+                }
+                if (onlyIfFree && workOrder.status !== "RECEIVED") {
+                    return { notInQueue: true };
                 }
 
                 const assignedAt = new Date();

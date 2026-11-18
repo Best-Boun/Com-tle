@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useI18n } from "../../i18n/I18nProvider.jsx";
-import { useAuth } from "../../auth/AuthProvider.jsx";
 import { api } from "../../api/index.js";
 import { useAsync } from "../../utils/useAsync.js";
 import { Empty, ErrorNotice, Loading, PageHead } from "../../components/ui.jsx";
@@ -29,25 +28,22 @@ function nextStep(w, L) {
 export default function TechJobs() {
     const { L, fmt } = useI18n();
     const [tab, setTab] = useState("active");
-    const { user } = useAuth();
     const list = useAsync(() => api.repairs.listAssigned(), []);
-    const queue = useAsync(() => api.bookings.queue({ days: 2 }), []);
+    const queue = useAsync(() => api.repairs.queue(), []);
     const items = (list.data || []).filter((w) => (tab === "active" ? ACTIVE.includes(w.status) : !ACTIVE.includes(w.status)));
     const actionable = (w) => ["PENDING", "APPROVED", "REPAIRING", "TESTING"].includes(w.status) || (w.status === "DIAGNOSING" && !w.has_pending_quotation);
     items.sort((a, b) => Number(actionable(b)) - Number(actionable(a)));
 
     const active = (list.data || []).filter((w) => ACTIVE.includes(w.status));
-    const upcoming = queue.data || [];
     const kpis = [
         { icon: Icon.Wrench, label: L("ต้องลงมือทำ", "Need you now"), value: active.filter(actionable).length },
         { icon: Icon.Clock, label: L("รอร้าน / ลูกค้า", "Waiting on shop / customer"), value: active.filter((w) => !actionable(w)).length },
-        { icon: Icon.Calendar, label: L("คิวที่คุณรับไว้", "Upcoming, yours"), value: upcoming.filter((b) => b.technician_id === user?.user_id).length, to: "/tech/queue" },
-        { icon: Icon.Clipboard, label: L("คิวที่ยังไม่มีคนรับ", "Upcoming, not taken"), value: upcoming.filter((b) => !b.technician_id).length, to: "/tech/queue" }
+        { icon: Icon.Clipboard, label: L("งานรอช่างในคิว", "Waiting in the queue"), value: queue.data ? queue.data.length : "—", to: "/tech/queue" }
     ];
 
     return (
         <div>
-            <PageHead title={L("งานของฉัน", "My jobs")} lede={L("งานที่ต้องลงมือทำอยู่ด้านบน คิวที่จะเข้ามาวันนี้และพรุ่งนี้ดูได้ที่ “คิวที่จะเข้ามา”", "Jobs that need you are at the top. Today's and tomorrow's appointments are in Upcoming queue.")} />
+            <PageHead title={L("งานของฉัน", "My jobs")} lede={L("งานที่ต้องลงมือทำอยู่ด้านบน เครื่องที่ร้านรับแล้วแต่ยังไม่มีช่างรับ ดูได้ที่ “คิวงานรอช่าง”", "Jobs that need you are at the top. Received devices nobody has taken yet are in the queue.")} />
             <div className="kpi-row" style={{ marginBottom: 24 }}>
                 {kpis.map((k) => {
                     const body = (
@@ -68,7 +64,7 @@ export default function TechJobs() {
             </div>
             {list.loading && <Loading />}
             <ErrorNotice error={list.error} onRetry={list.reload} />
-            {list.data && items.length === 0 && <Empty title={tab === "active" ? L("ไม่มีงานค้าง", "No active jobs") : L("ยังไม่มีงานที่เสร็จ", "No finished jobs yet")}>{tab === "active" && L("งานที่คุณรับจากคิว หรือที่ร้านมอบหมาย จะขึ้นที่นี่เมื่อร้านรับเครื่องแล้ว", "Jobs you took from the queue, or that the shop assigns, appear here once the device is checked in.")}</Empty>}
+            {list.data && items.length === 0 && <Empty title={tab === "active" ? L("ไม่มีงานค้าง", "No active jobs") : L("ยังไม่มีงานที่เสร็จ", "No finished jobs yet")}>{tab === "active" && L("งานที่คุณรับจากคิว หรือที่ร้านมอบหมาย จะขึ้นที่นี่", "Jobs you take from the queue, or that the shop assigns, appear here.")}</Empty>}
             <div className="ticket-list">
                 {items.map((w) => (
                     <Ticket

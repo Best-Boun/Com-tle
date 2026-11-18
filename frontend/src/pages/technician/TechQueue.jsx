@@ -1,94 +1,82 @@
+import { useNavigate } from "react-router-dom";
 import { useI18n } from "../../i18n/I18nProvider.jsx";
-import { useAuth } from "../../auth/AuthProvider.jsx";
 import { api } from "../../api/index.js";
 import { useAsync } from "../../utils/useAsync.js";
+import { deviceLabel } from "../../components/repair.jsx";
 import { Empty, ErrorNotice, Loading, PageHead, useAction } from "../../components/ui.jsx";
 import "../admin/admin.css";
 
 /**
- * Bookings coming in today and tomorrow. A technician sees what devices are
- * on the way and takes a job before it arrives; check-in then hands the work
- * order straight to them.
+ * Devices the shop has received that no technician has taken yet, oldest
+ * first. A technician takes one and it moves to My jobs; whoever presses
+ * first gets it.
  */
 export default function TechQueue() {
-    const { L, fmt } = useI18n();
-    const { user } = useAuth();
-    const queue = useAsync(() => api.bookings.queue({ days: 2 }), []);
+    const { L, t, fmt } = useI18n();
+    const navigate = useNavigate();
+    const queue = useAsync(() => api.repairs.queue(), []);
     const [run, busy] = useAction();
 
-    async function take(b) {
-        await run(() => api.bookings.claim(b.booking_id), L(`รับงาน ${b.booking_number} แล้ว`, `You took ${b.booking_number}`)).catch(() => null);
-        queue.reload();
-    }
-
-    async function giveBack(b) {
-        await run(() => api.bookings.release(b.booking_id), L("คืนงานเข้าคิวแล้ว", "Job given back")).catch(() => null);
-        queue.reload();
+    async function take(w) {
+        const taken = await run(
+            () => api.repairs.claim(w.work_order_id),
+            L(`รับงาน ${w.work_order_number} แล้ว`, `You took ${w.work_order_number}`)
+        ).catch(() => null);
+        if (taken) navigate(`/tech/jobs/${w.work_order_id}`);
+        else queue.reload();
     }
 
     const items = queue.data || [];
-    const days = [...new Set(items.map((b) => b.appointment_date))];
-    const mine = items.filter((b) => b.technician_id === user?.user_id).length;
-    const free = items.filter((b) => !b.technician_id).length;
+    const waitingHours = (w) => Math.floor((Date.now() - new Date(w.received_at || w.created_at).getTime()) / 3600000);
 
     return (
         <div className="stack-lg">
             <PageHead
-                title={L("คิวที่จะเข้ามา", "Upcoming queue")}
-                lede={L("นัดซ่อมวันนี้และพรุ่งนี้ กดรับงานไว้ก่อนได้ พอร้านรับเครื่อง ใบงานจะมาที่ “งานของฉัน” ทันที", "Today's and tomorrow's appointments. Take a job ahead of time; once the shop checks the device in, the work order lands in My jobs.")}
+                title={L("คิวงานรอช่าง", "Jobs waiting for a technician")}
+                lede={L(
+                    "เครื่องที่ร้านรับเข้ามาแล้วแต่ยังไม่มีช่างรับ เรียงจากที่รอนานที่สุด กดรับงานแล้วงานจะไปอยู่ที่ “งานของฉัน” ใครกดก่อนได้ก่อน",
+                    "Devices the shop has received that nobody has taken yet, longest waiting first. Take one and it moves to My jobs; first come, first served."
+                )}
+                actions={<button type="button" className="btn btn-secondary" disabled={queue.loading} onClick={queue.reload}>{L("รีเฟรช", "Refresh")}</button>}
             />
-            {queue.data && (
-                <p className="muted">
-                    {L(`ทั้งหมด ${items.length} คิว · คุณรับไว้ ${mine} · ยังไม่มีคนรับ ${free}`, `${items.length} appointments · ${mine} yours · ${free} not taken`)}
-                </p>
-            )}
+            {queue.data && <p className="muted">{L(`รอช่าง ${items.length} งาน`, `${items.length} waiting`)}</p>}
             {queue.loading && !queue.data && <Loading />}
             <ErrorNotice error={queue.error} onRetry={queue.reload} />
             {queue.data && items.length === 0 && (
-                <Empty title={L("ยังไม่มีนัดวันนี้และพรุ่งนี้", "No appointments today or tomorrow")}>
-                    {L("การจองใหม่จะขึ้นที่นี่ทันทีที่ลูกค้าจอง", "New bookings show up here as soon as customers book.")}
+                <Empty title={L("ไม่มีงานรอช่าง", "Nothing waiting")}>
+                    {L("เครื่องที่ร้านรับเข้ามาใหม่จะขึ้นที่นี่", "Newly received devices show up here.")}
                 </Empty>
             )}
-            {days.map((day) => (
-                <section key={day} className="stack">
-                    <h2>{fmt.day(day)}</h2>
-                    <div className="table-wrap">
-                        <table className="table">
-                            <thead>
-                                <tr>
-                                    <th>{L("เวลา", "Time")}</th>
-                                    <th>{L("บริการ / เครื่อง", "Service / device")}</th>
-                                    <th>{L("อาการที่แจ้ง", "Reported symptom")}</th>
-                                    <th className="right">{L("ช่าง", "Technician")}</th>
+            {items.length > 0 && (
+                <div className="table-wrap">
+                    <table className="table">
+                        <thead>
+                            <tr>
+                                <th>{L("รับเครื่องเมื่อ", "Received")}</th>
+                                <th>{L("เครื่อง", "Device")}</th>
+                                <th>{L("อาการที่แจ้ง", "Reported symptom")}</th>
+                                <th className="right">{L("ดำเนินการ", "Action")}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {items.map((w) => (
+                                <tr key={w.work_order_id}>
+                                    <td className="num">
+                                        {fmt.dateTime(w.received_at || w.created_at)}
+                                        <div className="faint small">{w.work_order_number} · {t(`source.${w.source}`)}</div>
+                                        {waitingHours(w) >= 24 && <div className="small" style={{ color: "var(--red)" }}>{L(`รอมา ${Math.floor(waitingHours(w) / 24)} วัน`, `Waiting ${Math.floor(waitingHours(w) / 24)} d`)}</div>}
+                                    </td>
+                                    <td>{deviceLabel(w)}<div className="faint small">{w.service_name}</div></td>
+                                    <td className="small">{w.reported_symptom}</td>
+                                    <td className="right">
+                                        <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => take(w)}>{L("รับงานนี้", "Take this job")}</button>
+                                    </td>
                                 </tr>
-                            </thead>
-                            <tbody>
-                                {items.filter((b) => b.appointment_date === day).map((b) => (
-                                    <tr key={b.booking_id}>
-                                        <td className="num">{b.appointment_time}<div className="faint small">{b.booking_number}</div></td>
-                                        <td>{b.service_name}<div className="faint small">{[b.device_type, b.brand, b.model].filter(Boolean).join(" · ")}</div></td>
-                                        <td className="small">{b.reported_symptom}</td>
-                                        <td className="right">
-                                            {!b.technician_id && (
-                                                <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => take(b)}>{L("รับงานนี้", "Take this job")}</button>
-                                            )}
-                                            {b.technician_id === user?.user_id && (
-                                                <div className="btn-row" style={{ justifyContent: "flex-end" }}>
-                                                    <span className="badge tone-green">{L("คุณรับไว้", "Yours")}</span>
-                                                    <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => giveBack(b)}>{L("คืนงาน", "Give back")}</button>
-                                                </div>
-                                            )}
-                                            {b.technician_id && b.technician_id !== user?.user_id && (
-                                                <span className="badge tone-grey">{L("ช่างคนอื่นรับแล้ว", "Taken")}</span>
-                                            )}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </section>
-            ))}
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
         </div>
     );
 }

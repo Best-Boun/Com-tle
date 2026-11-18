@@ -74,6 +74,8 @@ const repairRoutePatterns = [
     ["GET", /^\/work-orders$/],
     ["GET", /^\/work-orders\/me$/],
     ["GET", /^\/work-orders\/assigned$/],
+    ["GET", /^\/work-orders\/queue$/],
+    ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/claim$`)],
     ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/assign$`)],
     ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/diagnosis\\/start$`)],
     ["PUT", new RegExp(`^\\/work-orders\\/${UUID}\\/diagnosis$`)],
