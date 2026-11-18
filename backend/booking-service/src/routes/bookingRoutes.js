@@ -34,7 +34,6 @@ function createBookingRouter({ bookingService, authenticate }) {
     router.patch("/:bookingId/cancel", requireAnyPermission(BOOKING_CREATE, BOOKING_MANAGE), c.cancel);
     router.post("/:bookingId/check-in", requireAnyPermission(BOOKING_MANAGE), c.checkIn);
     router.patch("/:bookingId/no-show", requireAnyPermission(BOOKING_MANAGE), c.noShow);
-    router.post("/:bookingId/confirm-deposit", requireAnyPermission(BOOKING_CREATE), c.confirmDeposit);
     router.post("/:bookingId/claim", requireAnyPermission(WORK_ORDER_VIEW_ASSIGNED), c.claim);
     router.delete("/:bookingId/claim", requireAnyPermission(WORK_ORDER_VIEW_ASSIGNED, BOOKING_MANAGE), c.release);
 

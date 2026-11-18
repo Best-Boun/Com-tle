@@ -68,37 +68,19 @@ function cardValid(card) {
         && /^\d{3}$/.test(card.cvc);
 }
 
-/**
- * Pays either a work order's outstanding balance (`workOrder`) or any other
- * fixed charge (`charge`: { amount, label, seed, title?, dueAt?, doneNote?,
- * pay(method) -> { reference, at, result } }), e.g. a booking deposit.
- */
-export default function Checkout({ workOrder, charge, onClose, onPaid }) {
+export default function Checkout({ workOrder, onClose, onPaid }) {
     const { L, t, fmt } = useI18n();
     const [run] = useAction();
     const [method, setMethod] = useState("PROMPTPAY");
     const [card, setCard] = useState({ number: "", name: "", expiry: "", cvc: "" });
     const [step, setStep] = useState("choose"); // choose | processing | done
     const [paid, setPaid] = useState(null);
-    const amount = charge ? charge.amount : workOrder.payment.balance;
-    const label = charge ? charge.label : workOrder.work_order_number;
-    const seed = charge ? charge.seed : workOrder.work_order_id;
+    const amount = workOrder.payment.balance;
 
     async function pay() {
         setStep("processing");
         // Pretend to wait for the bank before recording the payment.
         await new Promise((resolve) => setTimeout(resolve, PROCESSING_MS));
-        if (charge) {
-            const done = await run(() => charge.pay(method)).catch(() => null);
-            if (!done) {
-                setStep("choose");
-                return;
-            }
-            setPaid({ amount, reference: done.reference || null, at: done.at || new Date().toISOString() });
-            setStep("done");
-            onPaid(done.result);
-            return;
-        }
         const updated = await run(() => api.payments.checkout(workOrder.work_order_id, { method })).catch(() => null);
         if (!updated) {
             setStep("choose");
@@ -124,10 +106,10 @@ export default function Checkout({ workOrder, charge, onClose, onPaid }) {
                     <div className="checkout-check" aria-hidden="true">✓</div>
                     <p className="checkout-amount"><Money value={paid.amount} /></p>
                     <p className="muted small" style={{ textAlign: "center" }}>
-                        {label} · {t(`pay.method.${method}`)} · {fmt.dateTime(paid.at)}
+                        {workOrder.work_order_number} · {t(`pay.method.${method}`)} · {fmt.dateTime(paid.at)}
                     </p>
                     {paid.reference && <p className="small faint num" style={{ textAlign: "center" }}>{L("เลขอ้างอิง", "Reference")} {paid.reference}</p>}
-                    <p className="small" style={{ textAlign: "center" }}>{charge?.doneNote || L("ร้านเห็นยอดชำระแล้วโดยอัตโนมัติ ไม่ต้องแจ้งสลิป", "The shop sees this payment automatically — no need to send a slip.")}</p>
+                    <p className="small" style={{ textAlign: "center" }}>{L("ร้านเห็นยอดชำระแล้วโดยอัตโนมัติ ไม่ต้องแจ้งสลิป", "The shop sees this payment automatically — no need to send a slip.")}</p>
                 </div>
             </Modal>
         );
@@ -135,7 +117,7 @@ export default function Checkout({ workOrder, charge, onClose, onPaid }) {
 
     return (
         <Modal
-            title={charge?.title || L("ชำระเงินออนไลน์", "Pay online")}
+            title={L("ชำระเงินออนไลน์", "Pay online")}
             onClose={busy ? () => {} : onClose}
             footer={(
                 <>
@@ -152,14 +134,9 @@ export default function Checkout({ workOrder, charge, onClose, onPaid }) {
         >
             <div className="stack">
                 <div className="checkout-total">
-                    <span className="muted small">{L("ยอดที่ต้องชำระ", "Amount due")} · {label}</span>
+                    <span className="muted small">{L("ยอดที่ต้องชำระ", "Amount due")} · {workOrder.work_order_number}</span>
                     <strong><Money value={amount} /></strong>
                 </div>
-                {charge?.dueAt && (
-                    <p className="small muted" style={{ margin: 0 }}>
-                        {L(`กันคิวไว้ให้ถึง ${fmt.time(charge.dueAt)} น. ชำระก่อนเวลานี้เพื่อยืนยันคิว`, `Your slot is held until ${fmt.time(charge.dueAt)}. Pay before then to confirm it.`)}
-                    </p>
-                )}
 
                 <div className="checkout-tabs" role="tablist" aria-label={L("วิธีชำระเงิน", "Payment method")}>
                     {["PROMPTPAY", "CARD"].map((m) => (
@@ -172,7 +149,7 @@ export default function Checkout({ workOrder, charge, onClose, onPaid }) {
 
                 {method === "PROMPTPAY" ? (
                     <div className="checkout-qr">
-                        <MockQr seed={seed} />
+                        <MockQr seed={workOrder.work_order_id} />
                         <p className="small muted">{L("สแกนด้วยแอปธนาคาร แล้วกดยืนยันด้านล่าง", "Scan with your banking app, then confirm below.")}</p>
                     </div>
                 ) : (

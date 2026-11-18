@@ -68,11 +68,6 @@ function createBookingController(bookingService) {
             res.status(200).json(successResponse("Job given back", booking));
         }),
 
-        confirmDeposit: handle(async (req, res) => {
-            const booking = await bookingService.confirmDeposit(req.params.bookingId, req.user, context(req));
-            res.status(200).json(successResponse("Deposit received, booking confirmed", booking));
-        }),
-
         noShow: handle(async (req, res) => {
             const booking = await bookingService.markNoShow(req.params.bookingId, req.body, req.user);
             res.status(200).json(successResponse("No-show recorded", booking));

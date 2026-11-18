@@ -54,16 +54,6 @@ const checkoutSchema = z.object({
     work_order_id: id,
     payment_method: z.enum(CHECKOUT_METHODS)
 }).strict();
-// Deposit paid online when booking (mock provider, same methods as checkout).
-const depositSchema = z.object({
-    booking_id: id,
-    payment_method: z.enum(CHECKOUT_METHODS)
-}).strict();
-const DEPOSIT_STATUSES = ["PAID", "APPLIED", "REFUNDED", "FORFEITED"];
-const depositListSchema = z.object({
-    status: z.enum(DEPOSIT_STATUSES).optional(),
-    booking_id: id.optional()
-}).strict();
 const voidSchema = z.object({ reason }).strict();
 const refundSchema = z.object({ payment_id: id, amount, reason }).strict();
 const rejectSchema = z.object({ reason }).strict();
@@ -152,8 +142,6 @@ function createPaymentService({
     requestPermission,
     requestCustomerId,
     loadWorkOrder = null,
-    loadBooking = null,
-    depositAmount = 200,
     createId = randomUUID,
     now = Date.now
 } = {}) {
@@ -271,7 +259,6 @@ function createPaymentService({
         return (await billsFor(trx, [workOrderId])).get(workOrderId) || null;
     }
 
-    // A booking deposit APPLIED to this work order counts as money already paid.
     async function totalsFor(trx, workOrderId) {
         const [paid] = await trx("payments")
             .sum({ total: "amount" })
@@ -279,14 +266,9 @@ function createPaymentService({
         const [refunded] = await trx("refunds")
             .sum({ total: "amount" })
             .where({ work_order_id: workOrderId, status: "COMPLETED" });
-        const [deposit] = await trx("deposits")
-            .sum({ total: "amount" })
-            .where({ work_order_id: workOrderId, status: "APPLIED" });
-        const depositTotal = toAmount(deposit?.total || 0);
         return {
-            paid_total: toAmount(paid?.total || 0) + depositTotal,
-            refunded_total: toAmount(refunded?.total || 0),
-            deposit_total: depositTotal
+            paid_total: toAmount(paid?.total || 0),
+            refunded_total: toAmount(refunded?.total || 0)
         };
     }
 
@@ -298,7 +280,6 @@ function createPaymentService({
             currency: bill.currency,
             bill_total: bill.total_amount,
             paid_total: totals.paid_total,
-            deposit_total: totals.deposit_total || 0,
             refunded_total: totals.refunded_total,
             outstanding_balance: bill.total_amount - totals.paid_total + totals.refunded_total,
             is_locked: Boolean(lock?.is_locked)
@@ -591,199 +572,6 @@ function createPaymentService({
                 action: "payment.checkout"
             });
         }), "Payment checkout unavailable");
-    }
-
-    // ---- booking deposits ------------------------------------------------------
-    //
-    // Every booking needs a fixed deposit before its slot is confirmed. The
-    // booking is read from Booking-Service with the caller's own token, so
-    // Booking-Service also decides who may see it. What happens to a paid
-    // deposit follows the booking, never the caller:
-    //   booking CANCELLED -> REFUNDED   (customer cancelled in time, or the shop did)
-    //   booking NO_SHOW   -> FORFEITED  (the shop keeps it)
-    //   booking COMPLETED -> APPLIED    (credited to the repair's work order)
-
-    const DEPOSIT_FIELDS = [
-        "deposit_id", "booking_id", "customer_user_id", "amount", "currency", "status",
-        "payment_method", "reference_number", "work_order_id", "paid_at", "settled_at"
-    ];
-
-    function depositView(row) {
-        return row ? { ...row, amount: toAmount(row.amount) } : null;
-    }
-
-    // payment_audit_logs / outbox_events must name exactly one payment or
-    // refund, so deposits keep their own trail (deposit_audit_logs).
-    async function depositAudit(trx, { depositId, actor, action, metadata }) {
-        await trx("deposit_audit_logs").insert({
-            audit_id: createId(),
-            deposit_id: depositId,
-            actor_user_id: actor,
-            action,
-            metadata: JSON.stringify(metadata),
-            created_at: new Date(now())
-        });
-    }
-
-    async function fetchBooking(bookingId, authorization) {
-        if (typeof loadBooking !== "function") {
-            throw new AppError("Booking Service is unavailable", 503);
-        }
-        try {
-            return await loadBooking(bookingId, authorization);
-        } catch (error) {
-            if (error instanceof AppError) {
-                throw error;
-            }
-            throw new AppError("Booking Service is unavailable", 503);
-        }
-    }
-
-    const isShop = (authContext) => hasPermission(authContext, PERMISSIONS.RECORD);
-
-    /** The deposit row if the caller may see it: the shop, or the customer who paid. */
-    async function visibleDeposit(authContext, bookingId) {
-        const actor = actorOf(authContext);
-        const row = await run(() => db("deposits").select(DEPOSIT_FIELDS)
-            .where({ booking_id: bookingId }).first(), "Deposit lookup unavailable");
-        if (row && row.customer_user_id === actor
-            && await hasPermission(authContext, PERMISSIONS.VIEW_OWN)) {
-            return row;
-        }
-        if (row && await isShop(authContext)) {
-            return row;
-        }
-        throw new AppError("Deposit not found", 404);
-    }
-
-    async function payDeposit(authContext, input, idempotencyKey, authorization) {
-        const actor = actorOf(authContext);
-        const request = parse(depositSchema, input, "Invalid deposit details");
-        if (!await hasPermission(authContext, PERMISSIONS.VIEW_OWN)) {
-            throw new AppError("Not authorized for this payment operation", 403);
-        }
-        const booking = await fetchBooking(request.booking_id, authorization);
-        if (!booking || booking.booking_id !== request.booking_id || booking.customer_id !== actor) {
-            throw new AppError("Booking not found", 404);
-        }
-        const existing = await run(() => db("deposits").select(DEPOSIT_FIELDS)
-            .where({ booking_id: request.booking_id }).first(), "Deposit lookup unavailable");
-        if (existing) {
-            if (existing.customer_user_id === actor && existing.status === "PAID") {
-                return depositView(existing);
-            }
-            throw new AppError("A deposit for this booking was already recorded", 409);
-        }
-        if (booking.status !== "AWAITING_DEPOSIT") {
-            throw new AppError("This booking is not waiting for a deposit", 409);
-        }
-        if (!booking.deposit_due_at || new Date(booking.deposit_due_at).getTime() <= now()) {
-            throw new AppError("The time to pay the deposit has run out", 409);
-        }
-
-        return run(() => idempotent(actor, "deposit.pay", idempotencyKey, request, async (trx) => {
-            const paidAt = new Date(now());
-            const row = {
-                deposit_id: createId(),
-                booking_id: request.booking_id,
-                customer_user_id: actor,
-                amount: depositAmount,
-                currency: CURRENCY,
-                status: "PAID",
-                payment_method: request.payment_method,
-                reference_number: `MOCK-${createId().replace(/-/g, "").slice(0, 12).toUpperCase()}`,
-                work_order_id: null,
-                paid_at: paidAt,
-                settled_at: null
-            };
-            try {
-                await trx("deposits").insert({ ...row, created_at: paidAt, updated_at: paidAt });
-            } catch (error) {
-                if (isDuplicateKey(error)) {
-                    throw new AppError("A deposit for this booking was already recorded", 409);
-                }
-                throw error;
-            }
-            await depositAudit(trx, {
-                depositId: row.deposit_id, actor, action: "deposit.paid",
-                metadata: {
-                    booking_id: row.booking_id, amount: row.amount, currency: CURRENCY,
-                    payment_method: row.payment_method, reference_number: row.reference_number
-                }
-            });
-            return { resource_type: "deposit", resource_id: row.deposit_id, body: depositView(row) };
-        }), "Deposit payment unavailable");
-    }
-
-    async function getDeposit(authContext, bookingId) {
-        return depositView(await visibleDeposit(authContext, parse(id, bookingId, "Invalid booking ID")));
-    }
-
-    async function listDeposits(authContext, query) {
-        const actor = actorOf(authContext);
-        const filters = parse(depositListSchema, query, "Invalid deposit query");
-        const shop = await isShop(authContext);
-        if (!shop && !await hasPermission(authContext, PERMISSIONS.VIEW_OWN)) {
-            throw new AppError("Not authorized for this payment operation", 403);
-        }
-        return run(async () => {
-            const rows = await db("deposits").select(DEPOSIT_FIELDS)
-                .where((builder) => {
-                    if (filters.status) builder.where({ status: filters.status });
-                    if (filters.booking_id) builder.where({ booking_id: filters.booking_id });
-                    if (!shop) builder.where({ customer_user_id: actor });
-                })
-                .orderBy([{ column: "paid_at", order: "desc" }, "deposit_id"])
-                .limit(500);
-            return { items: rows.map(depositView) };
-        }, "Deposit history unavailable");
-    }
-
-    /**
-     * Bring a paid deposit in line with its booking (idempotent). Called after
-     * a booking is cancelled, marked as a no-show or checked in.
-     */
-    async function settleDeposit(authContext, bookingId, authorization) {
-        const actor = actorOf(authContext);
-        const visible = await visibleDeposit(authContext, parse(id, bookingId, "Invalid booking ID"));
-        if (visible.status !== "PAID") {
-            return depositView(visible);
-        }
-        const booking = await fetchBooking(visible.booking_id, authorization);
-        if (!booking || booking.booking_id !== visible.booking_id) {
-            throw new AppError("Booking not found", 404);
-        }
-        let target = null;
-        if (booking.status === "CANCELLED") target = { status: "REFUNDED" };
-        if (booking.status === "NO_SHOW") target = { status: "FORFEITED" };
-        if (booking.status === "COMPLETED" && booking.work_order_id) {
-            target = { status: "APPLIED", work_order_id: booking.work_order_id };
-        }
-        if (!target) {
-            return depositView(visible);
-        }
-
-        return run(() => db.transaction(async (trx) => {
-            const row = await trx("deposits").select(DEPOSIT_FIELDS)
-                .where({ deposit_id: visible.deposit_id }).forUpdate().first();
-            if (row.status !== "PAID") {
-                return depositView(row);
-            }
-            const settledAt = new Date(now());
-            const changes = { ...target, settled_at: settledAt, updated_at: settledAt };
-            await trx("deposits").where({ deposit_id: row.deposit_id }).update(changes);
-            await depositAudit(trx, {
-                depositId: row.deposit_id,
-                actor,
-                action: `deposit.${target.status.toLowerCase()}`,
-                metadata: {
-                    booking_id: row.booking_id, amount: toAmount(row.amount), currency: row.currency,
-                    booking_status: booking.status, work_order_id: target.work_order_id || null
-                }
-            });
-            const { updated_at: _updatedAt, ...shown } = changes;
-            return depositView({ ...row, ...shown });
-        }), "Deposit settlement unavailable");
     }
 
     async function voidPayment(authContext, paymentId, input) {
@@ -1185,11 +973,7 @@ function createPaymentService({
         approveRefund,
         rejectRefund,
         executeRefund,
-        listRefunds,
-        payDeposit,
-        getDeposit,
-        listDeposits,
-        settleDeposit
+        listRefunds
     };
 }
 
