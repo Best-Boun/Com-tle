@@ -1,9 +1,11 @@
-const { BOOKING_STATUS, OPEN_STATUSES, SLOT_OCCUPYING_STATUSES } = require("../constants");
+const { OPEN_STATUSES } = require("../constants");
 
 const BOOKING_COLUMNS = [
     "booking_id",
     "booking_number",
     "customer_id",
+    "contact_name",
+    "contact_phone",
     "service_id",
     "service_code",
     "service_name",
@@ -13,12 +15,12 @@ const BOOKING_COLUMNS = [
     "brand",
     "model",
     "serial_number",
+    "symptom_group",
     "reported_symptom",
     "scheduled_at",
     "status",
     "work_order_id",
     "technician_id",
-    "technician_claimed_at",
     "cancelled_at",
     "cancelled_by",
     "cancellation_reason",
@@ -26,15 +28,18 @@ const BOOKING_COLUMNS = [
     "updated_at"
 ];
 
-const SLOT_LOCK_TIMEOUT_SECONDS = 10;
-
 function toBooking(row) {
     if (!row) return null;
     return { ...row, service_starting_price: Number(row.service_starting_price) };
 }
 
+function escapeLike(value) {
+    return value.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
 /**
- * Data access for booking_db (team schema). Methods take an optional `trx`.
+ * Data access for booking_db, which now holds repair requests.
+ * Methods take an optional `trx`.
  */
 function createBookingRepository(db) {
     if (!db) {
@@ -43,81 +48,35 @@ function createBookingRepository(db) {
 
     const q = (trx, table) => (trx || db)(table);
 
-    function applyFilters(query, { customerId, status, from, to }) {
+    /**
+     * search: a request number (RQ-... or an old BK-...) matches from the start;
+     * anything else is treated as part of a phone number (digits only).
+     */
+    function applyFilters(query, { customerId, status, from, to, search }) {
         if (customerId) query.where("customer_id", customerId);
         if (status) query.where("status", status);
-        if (from) query.where("scheduled_at", ">=", from);
-        if (to) query.where("scheduled_at", "<", to);
+        if (from) query.where("created_at", ">=", from);
+        if (to) query.where("created_at", "<", to);
+        if (search) {
+            const text = search.trim().toUpperCase();
+            if (/^(RQ|BK)-/.test(text)) {
+                query.where("booking_number", "like", `${escapeLike(text)}%`);
+            } else {
+                const digits = text.replace(/\D/g, "");
+                if (digits) {
+                    query.where("contact_phone", "like", `%${escapeLike(digits)}%`);
+                } else {
+                    // Nothing to match on: return no rows rather than everything.
+                    query.whereRaw("1 = 0");
+                }
+            }
+        }
         return query;
     }
 
     return {
         transaction(work) {
             return db.transaction(work);
-        },
-
-        /**
-         * Run `work(trx)` in a transaction while holding a MySQL named lock for
-         * the slot, so two requests cannot both take the last place in a slot.
-         * (Named locks need no extra table.)
-         *
-         * Lock, transaction and unlock all run on ONE pooled connection, and the
-         * lock is released only AFTER COMMIT — releasing it before commit would
-         * let the next request count before this insert is visible.
-         */
-        async withSlotLock(slotKey, work) {
-            const lockName = `booking_slot:${slotKey}`;
-            const connection = await db.client.acquireConnection();
-            const exec = (sql, params = []) => new Promise((resolve, reject) => {
-                connection.query(sql, params, (error, rows) => (error ? reject(error) : resolve(rows)));
-            });
-            // Query builder bound to this connection, used like a knex trx: trx("table")
-            const trx = (table) => db(table).connection(connection);
-
-            let locked = false;
-            try {
-                const [row] = await exec("SELECT GET_LOCK(?, ?) AS acquired", [lockName, SLOT_LOCK_TIMEOUT_SECONDS]);
-                if (Number(row.acquired) !== 1) {
-                    const error = new Error("Could not lock booking slot");
-                    error.code = "SLOT_LOCK_TIMEOUT";
-                    throw error;
-                }
-                locked = true;
-
-                await exec("START TRANSACTION");
-                let result;
-                try {
-                    result = await work(trx);
-                    await exec("COMMIT");
-                } catch (error) {
-                    await exec("ROLLBACK").catch(() => {});
-                    throw error;
-                }
-                return result;
-            } finally {
-                if (locked) {
-                    await exec("SELECT RELEASE_LOCK(?)", [lockName]).catch(() => {});
-                }
-                await db.client.releaseConnection(connection);
-            }
-        },
-
-        async countActiveAt(trx, scheduledAt) {
-            const [{ total }] = await q(trx, "bookings")
-                .where("scheduled_at", scheduledAt)
-                .whereIn("status", SLOT_OCCUPYING_STATUSES)
-                .count({ total: "*" });
-            return Number(total);
-        },
-
-        /** Active bookings between [from, to), returned as their scheduled_at values. */
-        async listActiveTimes(from, to) {
-            const rows = await q(null, "bookings")
-                .select("scheduled_at")
-                .where("scheduled_at", ">=", from)
-                .where("scheduled_at", "<", to)
-                .whereIn("status", SLOT_OCCUPYING_STATUSES);
-            return rows.map((r) => new Date(r.scheduled_at));
         },
 
         async insertBooking(trx, booking) {
@@ -142,11 +101,20 @@ function createBookingRepository(db) {
 
         async list(filters, { limit, offset }) {
             const rows = await applyFilters(q(null, "bookings").select(BOOKING_COLUMNS), filters)
-                .orderBy([{ column: "scheduled_at", order: "desc" }, { column: "created_at", order: "desc" }])
+                .orderBy([{ column: "created_at", order: "desc" }, { column: "booking_id", order: "asc" }])
                 .limit(limit)
                 .offset(offset);
             const [{ total }] = await applyFilters(q(null, "bookings"), filters).count({ total: "*" });
             return { items: rows.map(toBooking), total: Number(total) };
+        },
+
+        /** How many requests the customer still has open. */
+        async countOpenByCustomer(customerId) {
+            const [{ total }] = await q(null, "bookings")
+                .where({ customer_id: customerId })
+                .whereIn("status", OPEN_STATUSES)
+                .count({ total: "*" });
+            return Number(total);
         },
 
         /**
@@ -158,56 +126,6 @@ function createBookingRepository(db) {
                 .where({ booking_id: bookingId, status: fromStatus })
                 .update({ ...changes, updated_at: new Date() });
             return affected === 1;
-        },
-
-        /** Open bookings between [from, to), earliest first: the technicians' queue. */
-        async listOpenBetween(from, to) {
-            const rows = await q(null, "bookings")
-                .select(BOOKING_COLUMNS)
-                .whereIn("status", OPEN_STATUSES)
-                .where("scheduled_at", ">=", from)
-                .where("scheduled_at", "<", to)
-                .orderBy([{ column: "scheduled_at", order: "asc" }, { column: "created_at", order: "asc" }]);
-            return rows.map(toBooking);
-        },
-
-        /**
-         * A technician takes an open booking. Only succeeds while nobody has
-         * taken it yet, so two technicians cannot both get the same job.
-         */
-        async claim(bookingId, technicianId, claimedAt) {
-            const affected = await q(null, "bookings")
-                .where({ booking_id: bookingId })
-                .whereNull("technician_id")
-                .whereIn("status", OPEN_STATUSES)
-                .update({ technician_id: technicianId, technician_claimed_at: claimedAt, updated_at: claimedAt });
-            return affected === 1;
-        },
-
-        /** Give a taken booking back to the queue; `technicianId` limits it to that holder. */
-        async release(bookingId, technicianId = null) {
-            const query = q(null, "bookings")
-                .where({ booking_id: bookingId })
-                .whereIn("status", OPEN_STATUSES);
-            if (technicianId) query.where({ technician_id: technicianId });
-            const affected = await query.update({
-                technician_id: null,
-                technician_claimed_at: null,
-                updated_at: new Date()
-            });
-            return affected === 1;
-        },
-
-        /** customer_id -> number of bookings marked NO_SHOW. */
-        async countNoShows(customerIds) {
-            if (customerIds.length === 0) return new Map();
-            const rows = await q(null, "bookings")
-                .select("customer_id")
-                .count({ total: "*" })
-                .where({ status: BOOKING_STATUS.NO_SHOW })
-                .whereIn("customer_id", customerIds)
-                .groupBy("customer_id");
-            return new Map(rows.map((row) => [row.customer_id, Number(row.total)]));
         }
     };
 }

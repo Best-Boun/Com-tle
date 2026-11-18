@@ -45,8 +45,8 @@ export function PublicLayout() {
                         <NavLink to="/services">{L("บริการและราคา", "Services & prices")}</NavLink>
                         {isCustomer && (
                             <>
-                                <NavLink to="/book">{L("จองคิวซ่อม", "Book a repair")}</NavLink>
-                                <NavLink to="/my/bookings">{L("การจองของฉัน", "My bookings")}</NavLink>
+                                <NavLink to="/book">{L("แจ้งซ่อม", "Request a repair")}</NavLink>
+                                <NavLink to="/my/bookings">{L("การแจ้งซ่อมของฉัน", "My requests")}</NavLink>
                                 <NavLink to="/my/repairs">{L("ติดตามงานซ่อม", "Track repairs")}</NavLink>
                                 <NavLink to="/my/payments">{L("การชำระเงิน", "Payments")}</NavLink>
                             </>
@@ -63,7 +63,7 @@ export function PublicLayout() {
                         ) : (
                             <>
                                 <Link to="/login" className="btn btn-ghost btn-sm hide-sm">{L("เข้าสู่ระบบ", "Sign in")}</Link>
-                                <Link to="/book" className="btn btn-primary btn-sm">{L("จองคิว", "Book")}</Link>
+                                <Link to="/book" className="btn btn-primary btn-sm">{L("แจ้งซ่อม", "Request")}</Link>
                             </>
                         )}
                         <button type="button" className="btn btn-ghost btn-sm menu-toggle" aria-expanded={open} aria-label={L("เมนู", "Menu")} onClick={() => setOpen((v) => !v)}>
@@ -130,7 +130,7 @@ function Footer() {
 const STAFF_NAV = {
     ADMIN: [
         { to: "/admin", end: true, icon: Icon.Dashboard, th: "ภาพรวมวันนี้", en: "Today" },
-        { to: "/admin/bookings", icon: Icon.Calendar, th: "การจอง", en: "Bookings" },
+        { to: "/admin/bookings", icon: Icon.Calendar, th: "คำขอแจ้งซ่อม", en: "Repair requests" },
         { to: "/admin/work-orders", icon: Icon.Wrench, th: "ใบงานซ่อม", en: "Work orders" },
         { to: "/admin/catalog", icon: Icon.Tag, th: "บริการและราคา", en: "Services & prices" },
         { to: "/admin/inventory", icon: Icon.Box, th: "คลังอะไหล่", en: "Parts stock" },

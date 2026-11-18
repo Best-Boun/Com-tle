@@ -16,8 +16,8 @@ export default function MyRepairs() {
             {list.loading && <Loading />}
             <ErrorNotice error={list.error} onRetry={list.reload} />
             {list.data?.length === 0 && (
-                <Empty title={L("ยังไม่มีงานซ่อม", "No repairs yet")} action={<Link to="/book" className="btn btn-primary">{L("จองคิวซ่อม", "Book a repair")}</Link>}>
-                    {L("จองคิวแล้วนำเครื่องมาที่ร้าน แล้วติดตามความคืบหน้าได้ที่นี่", "Book, bring your device, then follow progress here.")}
+                <Empty title={L("ยังไม่มีงานซ่อม", "No repairs yet")} action={<Link to="/book" className="btn btn-primary">{L("แจ้งซ่อม", "Request a repair")}</Link>}>
+                    {L("นำเครื่องมาที่ร้าน แล้วติดตามความคืบหน้าได้ที่นี่", "Bring your device in, then follow progress here.")}
                 </Empty>
             )}
             <div className="ticket-list">

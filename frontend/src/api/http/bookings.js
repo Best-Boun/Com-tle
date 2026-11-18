@@ -36,22 +36,25 @@ async function withNames(bookings) {
 export const bookings = {
     config: SHOP,
 
-    async availability(date) {
-        return request(`/bookings/availability${query({ date })}`);
+    /** The choices the request form offers (device types and symptom groups). */
+    async options() {
+        return request("/bookings/options");
     },
 
+    /** "แจ้งซ่อมล่วงหน้า": device + symptom group + contact, no time slot. */
     async create(input) {
         const booking = await request("/bookings", {
             method: "POST",
             body: {
-                service_id: input.service_id,
-                appointment_date: input.appointment_date,
-                appointment_time: input.appointment_time,
                 device_type: input.device_type,
-                brand: input.brand || null,
-                model: input.model || null,
-                serial_number: input.serial_number || null,
-                reported_symptom: input.reported_symptom
+                brand: input.brand?.trim() || null,
+                model: input.model?.trim() || null,
+                serial_number: input.serial_number?.trim() || null,
+                symptom_group: input.symptom_group,
+                reported_symptom: input.reported_symptom,
+                contact_name: input.contact_name,
+                contact_phone: input.contact_phone,
+                service_id: input.service_id || null
             }
         });
         return withCustomerName(booking);
@@ -62,9 +65,9 @@ export const bookings = {
         return withNames(items);
     },
 
-    async listAll({ status, date } = {}) {
-        const items = await request(`/bookings${query({ status, date, limit: 100 })}`);
-        items.sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
+    /** The shop: newest first; search = request number (RQ-...) or phone. */
+    async listAll({ status, date, search } = {}) {
+        const items = await request(`/bookings${query({ status, date, search: search?.trim() || undefined, limit: 100 })}`);
         return withNames(items);
     },
 
@@ -77,33 +80,6 @@ export const bookings = {
         return { ...(await withCustomerName(booking)), status_history: history };
     },
 
-    /** Upcoming open bookings (today + next days) for technicians to take. */
-    async queue({ days = 2 } = {}) {
-        return request(`/bookings/queue${query({ days })}`);
-    },
-
-    /** A technician takes a booking before the device arrives. */
-    async claim(bookingId) {
-        return request(`/bookings/${encodeURIComponent(bookingId)}/claim`, { method: "POST" });
-    },
-
-    /** Give a taken booking back to the queue. */
-    async release(bookingId) {
-        return request(`/bookings/${encodeURIComponent(bookingId)}/claim`, { method: "DELETE" });
-    },
-
-    /** The customer did not come (only after the appointment time). */
-    async markNoShow(bookingId, reason) {
-        return withCustomerName(await request(`/bookings/${encodeURIComponent(bookingId)}/no-show`, {
-            method: "PATCH",
-            body: { reason: reason?.trim() || null }
-        }));
-    },
-
-    async confirm(bookingId) {
-        return withCustomerName(await request(`/bookings/${encodeURIComponent(bookingId)}/confirm`, { method: "PATCH" }));
-    },
-
     async cancel(bookingId, reason) {
         const trimmed = reason?.trim();
         return withCustomerName(await request(`/bookings/${encodeURIComponent(bookingId)}/cancel`, {
@@ -113,8 +89,8 @@ export const bookings = {
     },
 
     /**
-     * Customer arrived: Booking-Service asks Repair-Service to open the work order.
-     * The booking stays CONFIRMED if Repair-Service cannot open the work order.
+     * The customer brought the device in: Booking-Service asks Repair-Service to
+     * open the work order. The request stays open if Repair-Service cannot.
      */
     async checkIn(bookingId, { accessories, intake_terms_acknowledged } = {}) {
         const booking = await request(`/bookings/${encodeURIComponent(bookingId)}/check-in`, {
@@ -124,25 +100,23 @@ export const bookings = {
         return { booking: await withCustomerName(booking), work_order: { work_order_id: booking.work_order_id } };
     },
 
-    /** Booking numbers for the admin dashboard (replaces the demo figures). */
+    /**
+     * Request numbers for the admin dashboard. The old key names are kept for
+     * Dashboard.jsx until task 17 renames them: bookings_today = requests made
+     * today, bookings_overdue = requests waiting longer than 7 days for the
+     * device, upcoming = requests still waiting (newest first).
+     */
     async dashboardFigures() {
         const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
-        const [todays, all] = await Promise.all([
+        const [todays, waiting] = await Promise.all([
             request(`/bookings${query({ date: today, limit: 100 })}`),
-            request(`/bookings${query({ limit: 100 })}`)
+            request(`/bookings${query({ status: "PENDING", limit: 100 })}`)
         ]);
-        const now = Date.now();
-        const open = (b) => ["PENDING", "CONFIRMED"].includes(b.status);
-        const upcoming = all
-            .filter((b) => ["PENDING", "CONFIRMED"].includes(b.status) && new Date(b.scheduled_at).getTime() > now)
-            .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at))
-            .slice(0, 6);
+        const weekAgo = Date.now() - 7 * 24 * 3600 * 1000;
         return {
-            bookings_today: todays.filter((b) => !["CANCELLED", "NO_SHOW"].includes(b.status)).length,
-            // Bookings are confirmed automatically; what needs the shop now is an
-            // appointment whose time passed with no device checked in.
-            bookings_overdue: all.filter((b) => open(b) && new Date(b.scheduled_at).getTime() <= now).length,
-            upcoming: await withNames(upcoming)
+            bookings_today: todays.length,
+            bookings_overdue: waiting.filter((r) => new Date(r.created_at).getTime() < weekAgo).length,
+            upcoming: await withNames(waiting.slice(0, 6))
         };
     }
 };

@@ -199,7 +199,7 @@ export default function AdminUsers() {
                                     <strong>{t(`role.${r}`)}</strong>
                                     <span className="small muted">
                                         {r === "CUSTOMER"
-                                            ? L("จองคิว อนุมัติใบเสนอราคา ชำระเงิน", "Book, approve quotations, pay")
+                                            ? L("แจ้งซ่อม เลือกตัวเลือกการซ่อม ชำระเงิน", "Request repairs, choose options, pay")
                                             : L("รับงานซ่อม วินิจฉัย เบิกอะไหล่", "Take repair jobs, diagnose, issue parts")}
                                     </span>
                                 </span>

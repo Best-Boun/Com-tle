@@ -77,7 +77,7 @@ export default function Services() {
                                         <span className="small faint">{L("ใช้เวลาประมาณ", "About")} {s.estimated_duration_minutes} {L("นาที", "min")}</span>
                                         <div className="service-card-foot">
                                             <span className="price-tag"><span className="small">{L("เริ่ม", "from")}</span> <Money value={s.starting_price} /></span>
-                                            <Link to={`/book?service=${s.service_id}`} className="btn btn-primary btn-sm">{L("จองบริการนี้", "Book this")}</Link>
+                                            <Link to={`/book?service=${s.service_id}`} className="btn btn-primary btn-sm">{L("แจ้งซ่อมบริการนี้", "Request this")}</Link>
                                         </div>
                                     </li>
                                 ))}

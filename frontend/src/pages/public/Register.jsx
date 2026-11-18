@@ -36,7 +36,7 @@ export default function Register() {
         <AuthShell>
         <form className="stack" onSubmit={submit} noValidate>
             <h1>{L("สมัครสมาชิก", "Create an account")}</h1>
-            <p className="muted small">{L("ใช้บัญชีนี้จองคิว อนุมัติราคา และติดตามงานซ่อม", "Use it to book, approve quotations and track repairs.")}</p>
+            <p className="muted small">{L("ใช้บัญชีนี้แจ้งซ่อม เลือกตัวเลือกการซ่อม และติดตามงานซ่อม", "Use it to request repairs, choose options and track them.")}</p>
             <TextField label={L("ชื่อ-นามสกุล", "Full name")} autoComplete="name" value={form.full_name} onChange={set("full_name")} required />
             <TextField label={L("อีเมล", "Email")} type="email" autoComplete="email" value={form.email} onChange={set("email")} required />
             <TextField label={L("เบอร์โทร", "Phone")} type="tel" autoComplete="tel" value={form.phone} onChange={set("phone")} hint={L("ร้านจะโทรแจ้งเมื่อซ่อมเสร็จ", "We call when your device is ready")} />

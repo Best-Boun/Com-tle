@@ -38,7 +38,7 @@ export default function Login() {
         <AuthShell>
             <form className="stack" onSubmit={signIn} noValidate>
                 <h1>{L("เข้าสู่ระบบ", "Sign in")}</h1>
-                {location.state?.from && <div className="notice info">{L("เข้าสู่ระบบก่อนเพื่อจองคิวและติดตามงานซ่อม", "Sign in to book and track your repairs.")}</div>}
+                {location.state?.from && <div className="notice info">{L("เข้าสู่ระบบก่อนเพื่อแจ้งซ่อมและติดตามงานซ่อม", "Sign in to request and track your repairs.")}</div>}
                 <TextField label={L("อีเมล", "Email")} type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
                 <TextField label={L("รหัสผ่าน", "Password")} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
                 {error && <div className="notice error" role="alert">{error}</div>}

@@ -124,7 +124,7 @@ export default function Home() {
     ];
 
     const steps = [
-        { th: "จองคิวออนไลน์", en: "Book online", dth: "เลือกบริการและเวลาที่สะดวก ไม่ต้องรอหน้าร้าน", den: "Pick a service and a time that suits you." },
+        { th: "แจ้งซ่อมออนไลน์", en: "Request online", dth: "บอกอาการไว้ก่อน แล้วนำเครื่องมาเมื่อสะดวก ไม่ต้องนัดเวลา", den: "Tell us what is wrong, then bring it in when it suits you." },
         { th: "นำเครื่องมาส่ง", en: "Drop off your device", dth: "ร้านออกใบงานพร้อมเลขติดตามให้ทันที", den: "We open a repair ticket you can track." },
         { th: "อนุมัติราคาก่อนซ่อม", en: "Approve the price", dth: "ช่างตรวจแล้วส่งใบเสนอราคา ไม่ซ่อมจนกว่าคุณกดอนุมัติ", den: "We only start once you approve the quotation." },
         { th: "ชำระเงินและรับเครื่อง", en: "Pay and pick up", dth: "ทดสอบก่อนส่งมอบทุกเครื่อง แบ่งชำระได้", den: "Tested before handover. Pay in parts if you like." }
@@ -140,12 +140,12 @@ export default function Home() {
                     </h1>
                     <p className="hero-lede">
                         {L(
-                            "ร้านซ่อมโน้ตบุ๊กและคอมพิวเตอร์ จองคิวออนไลน์ อนุมัติราคาก่อนซ่อม และดูได้ทุกขั้นว่าเครื่องคุณถึงไหนแล้ว",
-                            "Laptop and PC repair. Book online, approve the price before we start, and see every step of your repair."
+                            "ร้านซ่อมโน้ตบุ๊กและคอมพิวเตอร์ แจ้งซ่อมออนไลน์ เลือกราคาก่อนซ่อม และดูได้ทุกขั้นว่าเครื่องคุณถึงไหนแล้ว",
+                            "Laptop and PC repair. Request online, choose the price before we start, and see every step of your repair."
                         )}
                     </p>
                     <div className="btn-row">
-                        <Link to="/book" className="btn btn-copper btn-lg">{L("จองคิวซ่อม", "Book a repair")}</Link>
+                        <Link to="/book" className="btn btn-copper btn-lg">{L("แจ้งซ่อมล่วงหน้า", "Request a repair")}</Link>
                         <Link to="/services" className="btn btn-onboard btn-lg">{L("ดูบริการและราคา", "Services & prices")}</Link>
                     </div>
                     <ul className="hero-promises">
@@ -189,7 +189,7 @@ export default function Home() {
                                 {s.description && <p className="small muted">{s.description}</p>}
                                 <div className="service-card-foot">
                                     <span className="price-tag"><span className="small">{L("เริ่ม", "from")}</span> <Money value={s.starting_price} /></span>
-                                    <Link to={`/book?service=${s.service_id}`} className="btn btn-ghost btn-sm">{L("จอง", "Book")}</Link>
+                                    <Link to={`/book?service=${s.service_id}`} className="btn btn-ghost btn-sm">{L("แจ้งซ่อม", "Request")}</Link>
                                 </div>
                             </li>
                         ))}

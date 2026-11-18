@@ -115,18 +115,30 @@ function seed() {
         ...extra
     });
 
+    // Repair requests ("แจ้งซ่อมล่วงหน้า"): no appointment time, a symptom group and a contact phone.
+    const mkRequest = (id, number, customerId, serviceId, daysAgo, extra = {}) => mkBooking(id, number, customerId, serviceId, 0, "00:00", "PENDING", {
+        scheduled_at: null,
+        created_at: ago(daysAgo),
+        updated_at: ago(daysAgo),
+        ...extra
+    });
+
     const bookings = [
-        mkBooking("bk-1", `BK-${bangkokDate(2).replaceAll("-", "")}-K7QM2P`, "u-cust-1", "svc-clean", 2, "10:00", "PENDING"),
-        mkBooking("bk-2", `BK-${bangkokDate(1).replaceAll("-", "")}-H3TX9A`, "u-cust-2", "svc-ssd", 1, "13:00", "CONFIRMED", { device_type: "PC", brand: "ประกอบเอง", model: null, reported_symptom: "อยากเปลี่ยนเป็น SSD เปิดเครื่องช้ามาก" }),
+        mkRequest("bk-1", `RQ-${bangkokDate(0).replaceAll("-", "")}-K7QM2P`, "u-cust-1", "svc-diag", 0, {
+            device_type: "NOTEBOOK", symptom_group: "OVERHEATING_OR_NOISE", contact_name: "สมชาย ใจดี", contact_phone: "0812345678"
+        }),
+        mkRequest("bk-2", `RQ-${bangkokDate(-9).replaceAll("-", "")}-H3TX9A`, "u-cust-2", "svc-diag", 9, {
+            device_type: "DESKTOP", brand: "ประกอบเอง", model: null, symptom_group: "SLOW_OR_FREEZING",
+            reported_symptom: "เปิดเครื่องช้ามาก ค้างบ่อย", contact_name: "นิดา รักษ์ดี", contact_phone: "0897654321"
+        }),
         mkBooking("bk-3", `BK-${bangkokDate(-3).replaceAll("-", "")}-P9WD4R`, "u-cust-1", "svc-diag", -3, "11:00", "COMPLETED", { device_type: "โน้ตบุ๊ก", brand: "Lenovo", model: "IdeaPad 5", serial_number: "PF3XK2LM", reported_symptom: "เปิดไม่ติด ไฟชาร์จติดแต่จอดำ", work_order_id: "wo-1" }),
         mkBooking("bk-4", `BK-${bangkokDate(-6).replaceAll("-", "")}-Z2LN8C`, "u-cust-2", "svc-os", -6, "09:00", "CANCELLED", { cancelled_at: ago(7), cancelled_by: "u-cust-2", cancellation_reason: "ติดธุระ จะจองใหม่ภายหลัง" }),
         mkBooking("bk-5", `BK-${bangkokDate(-8).replaceAll("-", "")}-R5VJ7E`, "u-cust-2", "svc-ssd", -8, "14:00", "COMPLETED", { device_type: "โน้ตบุ๊ก", brand: "Acer", model: "Swift 3", reported_symptom: "เปลี่ยน SSD 1TB", work_order_id: "wo-3" })
     ];
 
     const bookingHistory = [
-        { history_id: newId(), booking_id: "bk-1", old_status: null, new_status: "PENDING", changed_by: "u-cust-1", reason: null, created_at: ago(1) },
-        { history_id: newId(), booking_id: "bk-2", old_status: null, new_status: "PENDING", changed_by: "u-cust-2", reason: null, created_at: ago(3) },
-        { history_id: newId(), booking_id: "bk-2", old_status: "PENDING", new_status: "CONFIRMED", changed_by: "u-admin-1", reason: null, created_at: ago(2) },
+        { history_id: newId(), booking_id: "bk-1", old_status: null, new_status: "PENDING", changed_by: "u-cust-1", reason: null, created_at: ago(0) },
+        { history_id: newId(), booking_id: "bk-2", old_status: null, new_status: "PENDING", changed_by: "u-cust-2", reason: null, created_at: ago(9) },
         { history_id: newId(), booking_id: "bk-3", old_status: null, new_status: "PENDING", changed_by: "u-cust-1", reason: null, created_at: ago(6) },
         { history_id: newId(), booking_id: "bk-3", old_status: "PENDING", new_status: "CONFIRMED", changed_by: "u-admin-1", reason: null, created_at: ago(5) },
         { history_id: newId(), booking_id: "bk-3", old_status: "CONFIRMED", new_status: "COMPLETED", changed_by: "u-admin-1", reason: null, created_at: ago(3) },
@@ -283,7 +295,7 @@ export function getDb() {
     if (db) return db;
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        db = raw ? JSON.parse(raw) : seed();
+        db = (raw && JSON.parse(raw)) || seed();
     } catch {
         db = seed();
     }
@@ -301,6 +313,8 @@ function upgrade(data) {
 }
 
 export function saveDb() {
+    // Nothing loaded yet (e.g. a call that never touched the data): keep what is stored.
+    if (!db) return;
     try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
     } catch {

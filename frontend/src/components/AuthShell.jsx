@@ -5,7 +5,7 @@ import { Icon } from "./icons.jsx";
 export default function AuthShell({ children }) {
     const { L } = useI18n();
     const points = [
-        { icon: Icon.Calendar, th: "จองคิวซ่อมล่วงหน้า ไม่ต้องรอหน้าร้าน", en: "Book ahead, skip the queue" },
+        { icon: Icon.Calendar, th: "แจ้งอาการไว้ล่วงหน้า แล้วนำเครื่องมาเมื่อสะดวก", en: "Tell us first, bring it in when it suits you" },
         { icon: Icon.Clipboard, th: "ดูผลตรวจและอนุมัติใบเสนอราคาเอง", en: "See the diagnosis, approve the quote" },
         { icon: Icon.Wrench, th: "ติดตามทุกขั้นจนรับเครื่อง", en: "Follow every step until pickup" }
     ];

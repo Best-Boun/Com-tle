@@ -46,16 +46,13 @@ const paymentRoutePatterns = [
 // Booking-Service routes under /api/bookings (ids are UUIDs, so /health stays unmapped).
 const UUID = "[0-9a-fA-F-]{36}";
 const bookingRoutePatterns = [
-    ["GET", /^\/availability$/],
+    ["GET", /^\/options$/],
     ["GET", /^\/me$/],
-    ["GET", /^\/queue$/],
     ["GET", /^\/$/],
     ["POST", /^\/$/],
     ["GET", new RegExp(`^\\/${UUID}$`)],
-    ["PATCH", new RegExp(`^\\/${UUID}\\/(?:confirm|cancel|no-show)$`)],
-    ["POST", new RegExp(`^\\/${UUID}\\/check-in$`)],
-    ["POST", new RegExp(`^\\/${UUID}\\/claim$`)],
-    ["DELETE", new RegExp(`^\\/${UUID}\\/claim$`)]
+    ["PATCH", new RegExp(`^\\/${UUID}\\/cancel$`)],
+    ["POST", new RegExp(`^\\/${UUID}\\/check-in$`)]
 ];
 
 // Catalog-Service routes under /api/catalog.

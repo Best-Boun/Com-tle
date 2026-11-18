@@ -4,50 +4,60 @@ const { PERMISSIONS } = require("../../../shared/constants");
 const { hasPermission } = require("../../../shared/middleware/serviceAuth");
 const { getPagination, getPaginationMeta } = require("../../../shared/utils/pagination");
 const { parseOrThrow } = require("../../../shared/utils/validation");
-const { BOOKING_STATUS, OPEN_STATUSES, ALLOWED_TRANSITIONS } = require("../constants");
 const {
-    nowInTimezone,
-    zonedToUtc,
-    utcToZoned,
-    addDays,
-    dayRangeUtc
-} = require("../utils/time");
+    BOOKING_STATUS,
+    OPEN_STATUSES,
+    ALLOWED_TRANSITIONS,
+    DEVICE_TYPES,
+    SYMPTOM_GROUPS,
+    DEVICE_TYPE_FOR_REPAIR,
+    SYMPTOM_GROUP_LABELS
+} = require("../constants");
+
+/** Symptom text for the work order: "[group] details", within Repair's 5000 characters. */
+function symptomForRepair(booking) {
+    const group = SYMPTOM_GROUP_LABELS[booking.symptom_group];
+    const text = group ? `[${group}] ${booking.reported_symptom}` : booking.reported_symptom;
+    return text.slice(0, 5000);
+}
+const { nowInTimezone, utcToZoned, dayRangeUtc } = require("../utils/time");
 const {
-    createBookingSchema,
+    createRequestSchema,
     reasonSchema,
     requiredReasonSchema,
-    availabilityQuerySchema,
     listQuerySchema,
-    queueQuerySchema,
+    checkInSchema,
     uuidSchema
 } = require("../validators/bookingSchemas");
 
 const NUMBER_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-/** e.g. BK-20261120-FAK643 (date = appointment date, shop-local). */
-function defaultBookingNumber(date) {
+/** e.g. RQ-20261119-FAK643 (date = the day the request was made, shop-local). */
+function defaultRequestNumber(date) {
     let suffix = "";
     for (let i = 0; i < 6; i += 1) {
         suffix += NUMBER_ALPHABET[randomInt(NUMBER_ALPHABET.length)];
     }
-    return `BK-${date.replaceAll("-", "")}-${suffix}`;
+    return `RQ-${date.replaceAll("-", "")}-${suffix}`;
 }
 
 function isDuplicateError(error) {
     return error?.code === "ER_DUP_ENTRY" || error?.errno === 1062;
 }
 
-function isDeadlockOrLockTimeout(error) {
-    return ["ER_LOCK_DEADLOCK", "SLOT_LOCK_TIMEOUT"].includes(error?.code) || error?.errno === 1213;
-}
-
+/**
+ * Repair requests ("แจ้งซ่อมล่วงหน้า"). The customer says which device and what
+ * kind of fault; there is no time slot. When they bring the device in, the
+ * counter finds the request by number or phone and checks it in, which
+ * creates the Work Order in Repair Service.
+ */
 function createBookingService({
     bookingRepository,
     catalogClient,
     repairClient,
     config,
     createId = randomUUID,
-    createBookingNumber = defaultBookingNumber,
+    createRequestNumber = defaultRequestNumber,
     now = () => new Date()
 }) {
     if (!bookingRepository || !catalogClient || !repairClient || !config) {
@@ -59,44 +69,46 @@ function createBookingService({
     const canManage = (user) => hasPermission(user, PERMISSIONS.BOOKING_MANAGE);
     const isOwner = (user, booking) => booking.customer_id === user.userId;
 
-    /** API shape: DB row + shop-local appointment_date/appointment_time. */
+    /** API shape. Old appointment bookings also get their shop-local date and time. */
     function present(booking) {
         if (!booking) return null;
-        const scheduledAt = new Date(booking.scheduled_at);
-        const local = utcToZoned(scheduledAt, tz);
-        return {
-            ...booking,
-            scheduled_at: scheduledAt.toISOString(),
-            appointment_date: local.date,
-            appointment_time: local.time,
-            timezone: tz
-        };
+        const shown = { ...booking, timezone: tz };
+        if (booking.scheduled_at) {
+            const scheduledAt = new Date(booking.scheduled_at);
+            const local = utcToZoned(scheduledAt, tz);
+            Object.assign(shown, {
+                scheduled_at: scheduledAt.toISOString(),
+                appointment_date: local.date,
+                appointment_time: local.time
+            });
+        }
+        return shown;
     }
 
     async function loadBooking(bookingId) {
         if (!uuidSchema.safeParse(bookingId).success) {
-            throw new AppError("Booking not found", 404);
+            throw new AppError("Repair request not found", 404);
         }
         const booking = await repo.findById(bookingId);
         if (!booking) {
-            throw new AppError("Booking not found", 404);
+            throw new AppError("Repair request not found", 404);
         }
         return booking;
     }
 
-    /** Owners and booking managers may see a booking; others get 404 (no existence leak). */
+    /** Owners and the shop may see a request; others get 404 (no existence leak). */
     async function loadVisibleBooking(bookingId, user) {
         const booking = await loadBooking(bookingId);
         const ownerCanView = isOwner(user, booking) && hasPermission(user, PERMISSIONS.BOOKING_VIEW_OWN);
         if (!ownerCanView && !canManage(user)) {
-            throw new AppError("Booking not found", 404);
+            throw new AppError("Repair request not found", 404);
         }
         return booking;
     }
 
     function assertTransition(booking, toStatus) {
-        if (!ALLOWED_TRANSITIONS[booking.status].includes(toStatus)) {
-            throw new AppError(`Booking cannot change from ${booking.status} to ${toStatus}`, 409);
+        if (!(ALLOWED_TRANSITIONS[booking.status] || []).includes(toStatus)) {
+            throw new AppError(`Repair request cannot change from ${booking.status} to ${toStatus}`, 409);
         }
     }
 
@@ -109,7 +121,7 @@ function createBookingService({
                 ...changes
             });
             if (!updated) {
-                throw new AppError("Booking was changed by someone else, please reload", 409);
+                throw new AppError("Repair request was changed by someone else, please reload", 409);
             }
             await repo.insertHistory(trx, {
                 history_id: createId(),
@@ -124,93 +136,53 @@ function createBookingService({
         return present(await repo.findById(booking.booking_id));
     }
 
-    function hasStarted(scheduledAt) {
-        return new Date(scheduledAt).getTime() <= now().getTime();
-    }
-
-    function assertBookableSlot(date, time) {
-        if (!config.slotTimes.includes(time)) {
-            throw new AppError("Selected time is not an available booking slot", 400);
-        }
-        const today = nowInTimezone(tz, now()).date;
-        if (date > addDays(today, config.maxDaysAhead)) {
-            throw new AppError(`Bookings can be made at most ${config.maxDaysAhead} days ahead`, 400);
-        }
-        const scheduledAt = zonedToUtc(date, time, tz);
-        if (hasStarted(scheduledAt)) {
-            throw new AppError("Selected time has already passed", 400);
-        }
-        return scheduledAt;
-    }
-
     async function listWith(filters, query) {
         const { page, limit, offset } = getPagination(query.page, query.limit);
         const range = query.date ? dayRangeUtc(query.date, tz) : {};
         const { items, total } = await repo.list(
-            { ...filters, status: query.status, from: range.start, to: range.end },
+            { ...filters, status: query.status, from: range.start, to: range.end, search: query.search },
             { limit, offset }
         );
         return { items: items.map(present), meta: getPaginationMeta(total, page, limit) };
     }
 
-    /** For the shop: how many times each customer did not come (customer_no_show_count). */
-    async function withNoShowCounts(items) {
-        const counts = await repo.countNoShows([...new Set(items.map((b) => b.customer_id))]);
-        return items.map((b) => ({ ...b, customer_no_show_count: counts.get(b.customer_id) || 0 }));
-    }
-
-    async function loadOpenBooking(bookingId) {
-        const booking = await loadBooking(bookingId);
-        if (!OPEN_STATUSES.includes(booking.status)) {
-            throw new AppError("This booking is no longer open", 409);
-        }
-        return booking;
-    }
-
     return {
-        async getAvailability(query) {
-            const { date } = parseOrThrow(availabilityQuerySchema, query, "Invalid query");
-            const { start, end } = dayRangeUtc(date, tz);
-            const taken = await repo.listActiveTimes(start, end);
-            const counts = {};
-            for (const instant of taken) {
-                const { time } = utcToZoned(instant, tz);
-                counts[time] = (counts[time] || 0) + 1;
-            }
-
-            const slots = config.slotTimes.map((time) => {
-                const booked = counts[time] || 0;
-                const open = !hasStarted(zonedToUtc(date, time, tz));
-                const remaining = open ? Math.max(0, config.slotCapacity - booked) : 0;
-                return { time, capacity: config.slotCapacity, booked, remaining, available: remaining > 0 };
-            });
-
-            return { date, timezone: tz, slots };
+        /** The choices the request form offers. */
+        getOptions() {
+            return { device_types: [...DEVICE_TYPES], symptom_groups: [...SYMPTOM_GROUPS] };
         },
 
         async createBooking(input, user, { authorization }) {
-            const data = parseOrThrow(createBookingSchema, input, "Invalid booking details");
-            const scheduledAt = assertBookableSlot(data.appointment_date, data.appointment_time);
+            const data = parseOrThrow(createRequestSchema, input, "Invalid repair request");
 
-            // Booking -> Catalog: the service must exist and be bookable;
-            // its name/code/price are snapshotted into the booking.
-            const service = await catalogClient.getActiveService(data.service_id, { authorization });
+            const open = await repo.countOpenByCustomer(user.userId);
+            if (open >= config.maxOpenRequestsPerCustomer) {
+                throw new AppError(
+                    `You already have ${open} open repair requests. Please bring those devices in or cancel one first.`,
+                    409
+                );
+            }
+
+            // Booking -> Catalog: a known service the customer picked, otherwise
+            // the diagnosis service. Its name/code/price are snapshotted.
+            const service = await catalogClient.getActiveService(
+                data.service_id || config.diagnosisServiceId,
+                { authorization }
+            );
 
             const bookingId = createId();
-            const slotKey = scheduledAt.toISOString();
+            const today = nowInTimezone(tz, now()).date;
 
             for (let attempt = 0; attempt < 3; attempt += 1) {
                 try {
-                    await repo.withSlotLock(slotKey, async (trx) => {
-                        const taken = await repo.countActiveAt(trx, scheduledAt);
-                        if (taken >= config.slotCapacity) {
-                            throw new AppError("Selected time slot is fully booked", 409);
-                        }
+                    await repo.transaction(async (trx) => {
                         await repo.insertBooking(trx, {
                             booking_id: bookingId,
-                            booking_number: createBookingNumber(data.appointment_date),
+                            booking_number: createRequestNumber(today),
                             customer_id: user.userId,
-                            service_id: data.service_id,
+                            contact_name: data.contact_name,
+                            contact_phone: data.contact_phone,
+                            service_id: service.service_id,
                             service_code: service.service_code,
                             service_name: service.service_name,
                             service_starting_price: service.starting_price,
@@ -219,127 +191,59 @@ function createBookingService({
                             brand: data.brand || null,
                             model: data.model || null,
                             serial_number: data.serial_number || null,
+                            symptom_group: data.symptom_group,
                             reported_symptom: data.reported_symptom,
-                            scheduled_at: scheduledAt,
-                            // Confirmed straight away: the slot's capacity was just
-                            // checked under its lock, so the shop can take it.
-                            status: BOOKING_STATUS.CONFIRMED
+                            scheduled_at: null,
+                            status: BOOKING_STATUS.PENDING
                         });
                         await repo.insertHistory(trx, {
                             history_id: createId(),
                             booking_id: bookingId,
                             old_status: null,
-                            new_status: BOOKING_STATUS.CONFIRMED,
+                            new_status: BOOKING_STATUS.PENDING,
                             changed_by: user.userId,
                             reason: null
                         });
                     });
                     return present(await repo.findById(bookingId));
                 } catch (error) {
-                    // Retry on lock contention or a booking-number collision (nothing was committed).
-                    if ((isDeadlockOrLockTimeout(error) || isDuplicateError(error)) && attempt < 2) {
+                    // A request-number collision: nothing was committed, try another number.
+                    if (isDuplicateError(error) && attempt < 2) {
                         continue;
-                    }
-                    if (isDeadlockOrLockTimeout(error)) {
-                        throw new AppError("Booking system is busy, please try again", 503);
                     }
                     throw error;
                 }
             }
-            throw new AppError("Could not create booking, please try again", 503);
+            throw new AppError("Could not create the repair request, please try again", 503);
         },
 
         async listMyBookings(query, user) {
             const filters = parseOrThrow(listQuerySchema, query, "Invalid query");
-            return listWith({ customerId: user.userId }, filters);
+            return listWith({ customerId: user.userId }, { ...filters, search: undefined });
         },
 
+        /** The shop: all requests, or search by request number / phone at the counter. */
         async listBookings(query) {
             const filters = parseOrThrow(listQuerySchema, query, "Invalid query");
-            const result = await listWith({ customerId: filters.customer_id }, filters);
-            return { ...result, items: await withNoShowCounts(result.items) };
+            return listWith({ customerId: filters.customer_id }, filters);
         },
 
         async getBooking(bookingId, user) {
             const booking = await loadVisibleBooking(bookingId, user);
             const history = await repo.findHistory(booking.booking_id);
-            const shown = { ...present(booking), status_history: history };
-            return canManage(user) ? (await withNoShowCounts([shown]))[0] : shown;
+            return { ...present(booking), status_history: history };
         },
 
         /**
-         * Upcoming open bookings (today first) for technicians to see what is
-         * coming and take a job before the device arrives.
-         */
-        async listQueue(query) {
-            const { days = 2 } = parseOrThrow(queueQuerySchema, query, "Invalid query");
-            const today = nowInTimezone(tz, now()).date;
-            const from = dayRangeUtc(today, tz).start;
-            const to = dayRangeUtc(addDays(today, days - 1), tz).end;
-            const items = await repo.listOpenBetween(from, to);
-            return items.map(present);
-        },
-
-        async claimBooking(bookingId, user) {
-            const booking = await loadOpenBooking(bookingId);
-            if (booking.technician_id === user.userId) return present(booking);
-            if (booking.technician_id) {
-                throw new AppError("Another technician has already taken this job", 409);
-            }
-            if (!await repo.claim(booking.booking_id, user.userId, now())) {
-                const current = await repo.findById(booking.booking_id);
-                if (current?.technician_id === user.userId) return present(current);
-                throw new AppError("Another technician has already taken this job", 409);
-            }
-            return present(await repo.findById(booking.booking_id));
-        },
-
-        /** The technician who took the job, or the shop, gives it back to the queue. */
-        async releaseBooking(bookingId, user) {
-            const booking = await loadOpenBooking(bookingId);
-            if (!booking.technician_id) return present(booking);
-            const managing = canManage(user);
-            if (!managing && booking.technician_id !== user.userId) {
-                throw new AppError("Only the technician who took this job can give it back", 403);
-            }
-            await repo.release(booking.booking_id, managing ? null : user.userId);
-            return present(await repo.findById(booking.booking_id));
-        },
-
-        /**
-         * The customer did not come. Only after the appointment time, and
-         * separate from a cancellation so no-shows can be counted per customer.
-         */
-        async markNoShow(bookingId, input, user) {
-            const booking = await loadBooking(bookingId);
-            if (!hasStarted(booking.scheduled_at)) {
-                throw new AppError("A no-show can only be recorded after the appointment time", 409);
-            }
-            const { reason } = parseOrThrow(reasonSchema, input || {}, "Invalid no-show details");
-            return changeStatus(booking, BOOKING_STATUS.NO_SHOW, user, { reason: reason || null });
-        },
-
-        async confirmBooking(bookingId, user) {
-            const booking = await loadBooking(bookingId);
-            return changeStatus(booking, BOOKING_STATUS.CONFIRMED, user);
-        },
-
-        /**
-         * Customers may cancel their own booking before the appointment.
-         * The shop (booking.manage) may cancel any time with a reason —
-         * this is also how a no-show is recorded.
+         * Customers may cancel their own open request at any time.
+         * The shop (booking.manage) may cancel any open request, with a reason.
          */
         async cancelBooking(bookingId, input, user) {
             const booking = await loadVisibleBooking(bookingId, user);
             const managing = canManage(user);
 
-            if (!managing) {
-                if (!isOwner(user, booking) || !hasPermission(user, PERMISSIONS.BOOKING_CREATE)) {
-                    throw new AppError("Booking not found", 404);
-                }
-                if (hasStarted(booking.scheduled_at)) {
-                    throw new AppError("Appointment time has passed, please contact the shop", 409);
-                }
+            if (!managing && (!isOwner(user, booking) || !hasPermission(user, PERMISSIONS.BOOKING_CREATE))) {
+                throw new AppError("Repair request not found", 404);
             }
 
             const { reason } = parseOrThrow(
@@ -359,12 +263,23 @@ function createBookingService({
         },
 
         /**
-         * Customer arrived with the device: Booking -> Repair creates the Work Order,
-         * then the booking becomes COMPLETED. If Repair fails, the booking stays
-         * CONFIRMED and the call can be retried safely (same Idempotency-Key).
+         * The customer brought the device in: Booking -> Repair creates the Work
+         * Order, then the request becomes COMPLETED. If Repair fails, the request
+         * stays open and the call can be retried safely (same Idempotency-Key).
+         *
+         * Repair's contract still uses the booking_* names and scheduled_at;
+         * a request has no appointment, so scheduled_at is when it was made.
          */
-        async checkIn(bookingId, user, { authorization }, { accessories, intake_terms_acknowledged } = {}) {
+        async checkIn(bookingId, user, { authorization }, input = {}) {
+            const { accessories, intake_terms_acknowledged } = parseOrThrow(
+                checkInSchema,
+                input || {},
+                "Invalid check-in details"
+            );
             const booking = await loadBooking(bookingId);
+            if (!OPEN_STATUSES.includes(booking.status)) {
+                throw new AppError("This repair request is no longer open", 409);
+            }
             assertTransition(booking, BOOKING_STATUS.COMPLETED);
 
             const { workOrderId } = await repairClient.createWorkOrderFromBooking(
@@ -376,15 +291,15 @@ function createBookingService({
                     service_id: booking.service_id,
                     service_code: booking.service_code,
                     service_name: booking.service_name,
-                    device_type: booking.device_type,
+                    device_type: DEVICE_TYPE_FOR_REPAIR[booking.device_type] || booking.device_type,
                     brand: booking.brand,
                     model: booking.model,
                     serial_number: booking.serial_number,
-                    accessories: typeof accessories === "string" ? accessories.trim() || null : null,
-                    reported_symptom: booking.reported_symptom,
-                    scheduled_at: new Date(booking.scheduled_at).toISOString(),
+                    accessories: accessories || null,
+                    reported_symptom: symptomForRepair(booking),
+                    scheduled_at: new Date(booking.scheduled_at || booking.created_at).toISOString(),
                     intake_terms_acknowledged: intake_terms_acknowledged === true,
-                    // The technician who took this booking gets the work order.
+                    // Old appointment bookings a technician took before this change.
                     ...(booking.technician_id ? { technician_user_id: booking.technician_id } : {})
                 },
                 { authorization, idempotencyKey: `booking-${booking.booking_id}` }
