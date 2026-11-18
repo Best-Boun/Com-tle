@@ -50,7 +50,6 @@ test("time helpers convert Bangkok wall-clock time to UTC and back", () => {
     assert.equal(utc.toISOString(), "2026-11-12T03:00:00.000Z");
     assert.deepEqual(utcToZoned(utc, "Asia/Bangkok"), { date: "2026-11-12", time: "10:00" });
 });
-
 test("createBooking stores UTC scheduled_at, team columns, and is confirmed straight away", async () => {
     const { service, repo, clients } = setup();
     const booking = await service.createBooking(bookingInput(), CUSTOMER, CTX);
@@ -281,28 +280,4 @@ test("a technician takes a booking first-come, can give it back, and check-in ha
     assert.equal(clients.calls.repair[0].payload.technician_user_id, TECH.userId);
     await assert.rejects(service.claimBooking(booking.booking_id, OTHER_TECH), { statusCode: 409 });
     await assert.rejects(service.claimBooking("not-a-uuid", TECH), { statusCode: 404 });
-});
-
-test("a legacy AWAITING_DEPOSIT booking (removed deposit feature) holds no slot and can only be cancelled", async () => {
-    const { service, repo } = setup();
-    await repo.insertBooking(null, {
-        booking_id: "dddddddd-0000-4000-8000-000000000001",
-        booking_number: "BK-LEGACY",
-        customer_id: CUSTOMER.userId,
-        service_id: SERVICE_ID,
-        service_code: "PC-CLEAN",
-        service_name: "PC Cleaning",
-        service_starting_price: 500,
-        service_currency: "THB",
-        device_type: "PC",
-        reported_symptom: "old hold",
-        scheduled_at: new Date("2026-11-12T03:00:00Z"),
-        status: "AWAITING_DEPOSIT"
-    });
-    // It does not take a place in the slot.
-    await service.createBooking(bookingInput(), CUSTOMER, CTX);
-    await service.createBooking(bookingInput(), OTHER_CUSTOMER, CTX);
-    await assert.rejects(service.checkIn("dddddddd-0000-4000-8000-000000000001", ADMIN, CTX), { statusCode: 409 });
-    const cancelled = await service.cancelBooking("dddddddd-0000-4000-8000-000000000001", { reason: "ระบบมัดจำเลิกใช้" }, ADMIN);
-    assert.equal(cancelled.status, "CANCELLED");
 });

@@ -10,9 +10,9 @@ export default function WalkInNew() {
     const navigate = useNavigate();
     const services = useAsync(() => api.catalog.listServices(), []);
     const [run, busy] = useAction();
-    const [f, setF] = useState({ customer_name: "", customer_phone: "", service_id: "", device_type: "", brand: "", model: "", serial_number: "", reported_symptom: "", accessories: "" });
+    const [f, setF] = useState({ customer_name: "", customer_phone: "", service_id: "", device_type: "", brand: "", model: "", serial_number: "", reported_symptom: "", accessories: "", intake_terms_acknowledged: false });
     const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
-    const valid = f.customer_name.trim() && f.customer_phone.trim() && f.device_type.trim() && f.reported_symptom.trim();
+    const valid = f.customer_name.trim() && f.customer_phone.trim() && f.device_type.trim() && f.reported_symptom.trim() && f.intake_terms_acknowledged;
 
     async function submit(e) {
         e.preventDefault();
@@ -59,6 +59,10 @@ export default function WalkInNew() {
                     </div>
                     <TextField as="textarea" label={L("อาการที่ลูกค้าแจ้ง", "Reported problem")} value={f.reported_symptom} onChange={set("reported_symptom")} required />
                 </fieldset>
+                <label className="panel small" style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                    <input type="checkbox" checked={f.intake_terms_acknowledged} onChange={(e) => setF((x) => ({ ...x, intake_terms_acknowledged: e.target.checked }))} />
+                    <span>{L("ลูกค้ารับทราบเงื่อนไขการรับเครื่อง ตรวจสอบอุปกรณ์ และยอมรับการติดตามสถานะงานซ่อม", "The customer acknowledges the device intake terms, accessory check and repair tracking process.")}</span>
+                </label>
                 <div className="btn-row">
                     <button type="submit" className="btn btn-primary btn-lg" disabled={busy || !valid}>{L("เปิดใบงาน", "Open work order")}</button>
                     <Link to="/admin/work-orders" className="btn btn-secondary btn-lg">{L("ยกเลิก", "Cancel")}</Link>

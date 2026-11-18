@@ -116,10 +116,10 @@ export const bookings = {
      * Customer arrived: Booking-Service asks Repair-Service to open the work order.
      * The booking stays CONFIRMED if Repair-Service cannot open the work order.
      */
-    async checkIn(bookingId, { accessories } = {}) {
+    async checkIn(bookingId, { accessories, intake_terms_acknowledged } = {}) {
         const booking = await request(`/bookings/${encodeURIComponent(bookingId)}/check-in`, {
             method: "POST",
-            body: { accessories: accessories?.trim() || null }
+            body: { accessories: accessories?.trim() || null, intake_terms_acknowledged: intake_terms_acknowledged === true }
         });
         return { booking: await withCustomerName(booking), work_order: { work_order_id: booking.work_order_id } };
     },

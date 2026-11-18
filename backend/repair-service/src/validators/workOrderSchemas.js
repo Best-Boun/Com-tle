@@ -30,7 +30,8 @@ const createBookingWorkOrderSchema = z.object({
     reported_symptom: z.string().trim().min(1).max(5000),
     scheduled_at: z.string().datetime({ offset: true }),
     // The technician who took the booking before the customer arrived.
-    technician_user_id: z.string().uuid().optional()
+    technician_user_id: z.string().uuid().optional(),
+    intake_terms_acknowledged: z.boolean().optional()
 }).strict();
 
 const listWorkOrdersSchema = z.object({
@@ -64,7 +65,8 @@ const createWalkInSchema = z.object({
     model: nullableText(150),
     serial_number: nullableText(150),
     reported_symptom: z.string().trim().min(1).max(5000),
-    accessories: nullableText(1000)
+    accessories: nullableText(1000),
+    intake_terms_acknowledged: z.boolean()
 }).strict();
 
 const diagnosisSchema = z.string().trim().min(1).max(5000);
@@ -110,7 +112,8 @@ const testResultSchema = z.object({
     notes: z.string().trim().min(1).max(5000)
 }).strict();
 const handoverSchema = z.object({
-    exceptionReason: nullableText(1000)
+    exceptionReason: nullableText(1000),
+    terms_acknowledged: z.boolean()
 }).strict();
 const cancelSchema = z.object({
     reason: z.string().trim().min(1).max(1000),

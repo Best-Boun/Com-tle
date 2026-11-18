@@ -24,6 +24,8 @@ function workOrderQuery(db) {
             "wo.reported_symptom",
             "wo.repair_result",
             "wo.handed_over_at",
+            "wo.intake_terms_acknowledged_at",
+            "wo.handover_terms_acknowledged_at",
             "wo.received_at",
             "wo.created_at",
             "wo.updated_at",
@@ -374,6 +376,7 @@ function createWorkOrderRepository(db) {
                     service_code: workOrder.service_code,
                     service_name: workOrder.service_name,
                     reported_symptom: workOrder.reported_symptom,
+                    intake_terms_acknowledged_at: workOrder.intake_terms_acknowledged_at || null,
                     status: workOrder.status,
                     received_at: workOrder.received_at,
                     created_at: workOrder.created_at,
@@ -414,6 +417,7 @@ function createWorkOrderRepository(db) {
                     service_code: workOrder.service_code,
                     service_name: workOrder.service_name,
                     reported_symptom: workOrder.reported_symptom,
+                    intake_terms_acknowledged_at: workOrder.intake_terms_acknowledged_at || null,
                     status: "RECEIVED",
                     received_at: workOrder.received_at,
                     created_at: workOrder.created_at,
@@ -900,6 +904,7 @@ function createWorkOrderRepository(db) {
                     status: "HANDED_OVER",
                     close_reason: "REPAIRED",
                     handed_over_at: handedOverAt,
+                    handover_terms_acknowledged_at: handedOverAt,
                     updated_at: handedOverAt
                 });
                 await trx("work_order_status_history").insert({

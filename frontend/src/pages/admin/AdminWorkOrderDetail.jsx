@@ -194,7 +194,7 @@ export default function AdminWorkOrderDetail() {
                                 : <p className="muted small">{L("ซ่อมเสร็จ ทดสอบผ่าน และชำระครบแล้ว", "Repaired, tested and fully paid.")}</p>}
                             <div className="btn-row">
                                 {w.payment.balance > 0 && <button type="button" className="btn btn-primary" onClick={() => { setForm({ amount: String(w.payment.balance), method: "CASH" }); setModal("pay"); }}>{L("รับชำระเงิน", "Take payment")}</button>}
-                                <button type="button" className={`btn ${w.payment.balance > 0 ? "btn-secondary" : "btn-primary"}`} onClick={() => { setForm({ reason: "" }); setModal("handover"); }}>
+                                <button type="button" className={`btn ${w.payment.balance > 0 ? "btn-secondary" : "btn-primary"}`} onClick={() => { setForm({ reason: "", termsAcknowledged: false }); setModal("handover"); }}>
                                     {w.payment.balance > 0 ? L("ส่งมอบแบบข้อยกเว้น", "Hand over with exception") : L("ส่งมอบเครื่องแล้ว", "Mark as handed over")}
                                 </button>
                             </div>
@@ -348,17 +348,21 @@ export default function AdminWorkOrderDetail() {
                 <Modal title={L("ส่งมอบเครื่อง", "Hand over")} onClose={() => setModal(null)} footer={(
                     <>
                         <button type="button" className="btn btn-secondary" onClick={() => setModal(null)}>{t("common.cancel")}</button>
-                        <button type="button" className="btn btn-primary" disabled={busy || (w.payment.balance > 0 && !form.reason?.trim())} onClick={() => act(() => api.repairs.handover(w.work_order_id, { exceptionReason: form.reason }), L("ส่งมอบเครื่องแล้ว", "Handed over"))}>
+                        <button type="button" className="btn btn-primary" disabled={busy || !form.termsAcknowledged || (w.payment.balance > 0 && !form.reason?.trim())} onClick={() => act(() => api.repairs.handover(w.work_order_id, { exceptionReason: form.reason, terms_acknowledged: form.termsAcknowledged }), L("ส่งมอบเครื่องแล้ว", "Handed over"))}>
                             {L("ยืนยันส่งมอบ", "Confirm handover")}
                         </button>
                     </>
                 )}>
-                    {w.payment.balance > 0 ? (
-                        <div className="stack">
+                    <div className="stack">
+                        {w.payment.balance > 0 ? (
                             <div className="notice warn">{L(`ลูกค้ายังค้าง ${fmt.money(w.payment.balance)} ระบบจะบันทึกผู้อนุมัติ เหตุผล และยอดค้างไว้`, `${fmt.money(w.payment.balance)} is still due. Your name, the reason and the amount will be recorded.`)}</div>
-                            <TextField as="textarea" label={L("เหตุผลที่อนุมัติข้อยกเว้น", "Reason for the exception")} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder={L("เช่น ลูกค้าประจำ จะโอนส่วนที่เหลือภายในศุกร์นี้", "e.g. regular customer, will transfer the rest by Friday")} />
-                        </div>
-                    ) : <p>{L("ยืนยันว่าลูกค้ารับเครื่องแล้ว", "Confirm the customer has collected the device.")}</p>}
+                        ) : <p>{L("ยืนยันว่าลูกค้ารับเครื่องแล้ว", "Confirm the customer has collected the device.")}</p>}
+                        {w.payment.balance > 0 && <TextField as="textarea" label={L("เหตุผลที่อนุมัติข้อยกเว้น", "Reason for the exception")} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} placeholder={L("เช่น ลูกค้าประจำ จะโอนส่วนที่เหลือภายในศุกร์นี้", "e.g. regular customer, will transfer the rest by Friday")} />}
+                        <label className="small" style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                            <input type="checkbox" checked={form.termsAcknowledged === true} onChange={(e) => setForm({ ...form, termsAcknowledged: e.target.checked })} />
+                            <span>{L("ลูกค้ารับทราบเงื่อนไขการรับเครื่อง และตรวจสอบความเรียบร้อยก่อนนำเครื่องออกจากร้าน", "The customer acknowledges the handover terms and confirms the device was checked before leaving.")}</span>
+                        </label>
+                    </div>
                 </Modal>
             )}
 
