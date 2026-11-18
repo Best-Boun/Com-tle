@@ -1,17 +1,21 @@
+import { useState } from "react";
 import { useI18n } from "../i18n/I18nProvider.jsx";
 import { WO_STAGES } from "../i18n/dictionary.js";
-import { Money, StatusBadge } from "./ui.jsx";
+import { Money, StatusBadge, TextField } from "./ui.jsx";
 import "../pages/customer/customer.css";
 
 /** Stage bar for a work order (customer-friendly). */
-export function RepairProgress({ status, handedOver }) {
+export function RepairProgress({ status, handedOver, declined = false }) {
     const { t } = useI18n();
     if (status === "CANCELLED") return null;
-    const index = WO_STAGES.indexOf(status);
+    // "No repair" skips the repair stages: inspected, then straight to pick-up.
+    const stages = declined ? WO_STAGES.filter((s) => !["APPROVED", "REPAIRING", "TESTING"].includes(s)) : WO_STAGES;
+    // Waiting for parts sits between "approved" and "repairing".
+    const index = stages.indexOf(status === "WAITING_PARTS" ? "APPROVED" : status);
     return (
-        <ol className="steps" style={{ "--count": WO_STAGES.length + 2 }} aria-label="progress">
+        <ol className="steps" style={{ "--count": stages.length + 2 }} aria-label="progress">
             <li className="done"><span>{t("status.wo.RECEIVED")}</span></li>
-            {WO_STAGES.map((s, i) => (
+            {stages.map((s, i) => (
                 <li key={s} className={i < index || (handedOver && i === index) ? "done" : i === index ? "current" : ""}>
                     <span>{t(`status.wo.${s}`)}</span>
                 </li>
@@ -36,44 +40,154 @@ export function QuotationCard({ quotation, superseded = false, children }) {
             </header>
             <div className="quote-body">
                 {q.note && <p className="small">{q.note}</p>}
-                <div className="table-wrap" style={{ border: 0 }}>
-                    <table className="table">
-                        <thead>
-                            <tr>
-                                <th>{L("รายการ", "Item")}</th>
-                                <th className="right">{L("จำนวน", "Qty")}</th>
-                                <th className="right">{L("ราคา/หน่วย", "Unit")}</th>
-                                <th className="right">{L("รวม", "Total")}</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {q.items.map((i) => (
-                                <tr key={i.item_id}>
-                                    <td>
-                                        {i.description}
-                                        <span className="faint small"> · {t(`item.${i.type}`)}</span>
-                                    </td>
-                                    <td className="right num">{i.qty}</td>
-                                    <td className="right">{q.status === "DRAFT" && !i.unit_price ? "—" : <Money value={i.unit_price} />}</td>
-                                    <td className="right">{q.status === "DRAFT" && !i.unit_price ? "—" : <Money value={i.qty * i.unit_price} />}</td>
-                                </tr>
-                            ))}
-                            <tr className="quote-total">
-                                <td colSpan={3}>{L("ยอดรวม", "Total")}</td>
-                                <td className="right">{q.status === "DRAFT" && !q.total ? "—" : <Money value={q.total} />}</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
+                {q.options?.length > 0 ? (
+                    <OptionList quotation={q} />
+                ) : (
+                    <ItemsTable items={q.items} total={q.total} draft={q.status === "DRAFT"} />
+                )}
                 {q.decided_at && (
                     <p className="small muted">
-                        {q.status === "APPROVED" ? L("อนุมัติโดย", "Approved by") : L("ปฏิเสธโดย", "Rejected by")} {q.decided_by_name || "—"} · {fmt.dateTime(q.decided_at)}
+                        {q.selected_option_id ? L("เลือกโดย", "Chosen by") : q.status === "APPROVED" ? L("อนุมัติโดย", "Approved by") : L("ปฏิเสธโดย", "Rejected by")} {q.decided_by_name || "—"} · {fmt.dateTime(q.decided_at)}
                         {q.decision_note && <> · “{q.decision_note}”</>}
                     </p>
                 )}
                 {children}
             </div>
         </article>
+    );
+}
+
+function ItemsTable({ items, total, draft = false }) {
+    const { L, t } = useI18n();
+    return (
+        <div className="table-wrap" style={{ border: 0 }}>
+            <table className="table">
+                <thead>
+                    <tr>
+                        <th>{L("รายการ", "Item")}</th>
+                        <th className="right">{L("จำนวน", "Qty")}</th>
+                        <th className="right">{L("ราคา/หน่วย", "Unit")}</th>
+                        <th className="right">{L("รวม", "Total")}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {items.map((i) => (
+                        <tr key={i.item_id}>
+                            <td>
+                                {i.description}
+                                <span className="faint small"> · {t(`item.${i.type}`)}</span>
+                            </td>
+                            <td className="right num">{i.qty}</td>
+                            <td className="right">{draft && !i.unit_price ? "—" : <Money value={i.unit_price} />}</td>
+                            <td className="right">{draft && !i.unit_price ? "—" : <Money value={i.qty * i.unit_price} />}</td>
+                        </tr>
+                    ))}
+                    <tr className="quote-total">
+                        <td colSpan={3}>{L("ยอดรวม", "Total")}</td>
+                        <td className="right">{draft && !total ? "—" : <Money value={total} />}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+/** Title of an option: the system's own options are labelled in the reader's language. */
+export function optionTitle(option, t, lang) {
+    if (option.kind === "REPAIR" || lang === "th") return option.title;
+    return t(`option.kind.${option.kind}`);
+}
+
+function OptionBody({ option }) {
+    const { L, t } = useI18n();
+    return (
+        <>
+            {option.description && <p className="small muted" style={{ margin: 0 }}>{option.kind === "REPAIR" ? option.description : L(option.description, option.kind === "NO_REPAIR" ? "Inspection is free when you repair. If you don't, only the inspection fee is charged." : "The approved repair goes on as agreed, at no extra cost.")}</p>}
+            {option.items.length > 0 && option.kind === "REPAIR" && (
+                <ul className="small">
+                    {option.items.map((i) => (
+                        <li key={i.item_id}>
+                            {i.description} <span className="faint">· {t(`item.${i.type}`)}{i.qty > 1 ? ` ×${i.qty}` : ""}</span> — <Money value={i.qty * i.unit_price} />
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </>
+    );
+}
+
+/** All options of a quotation, read-only. The chosen one is marked once decided. */
+export function OptionList({ quotation }) {
+    const { L, t, lang } = useI18n();
+    const decided = Boolean(quotation.selected_option_id);
+    return (
+        <ol className="quote-options">
+            {quotation.options.map((o, index) => {
+                const chosen = o.option_id === quotation.selected_option_id;
+                return (
+                    <li key={o.option_id} className={`quote-option ${o.kind !== "REPAIR" ? "is-system" : ""} ${chosen ? "is-chosen" : ""} ${decided && !chosen ? "is-faded" : ""}`}>
+                        <div className="quote-option-head">
+                            <span><span className="faint">{index + 1}.</span> <strong>{optionTitle(o, t, lang)}</strong>{chosen && <span className="small"> · {L("ตัวเลือกที่เลือก", "Chosen")}</span>}</span>
+                            <strong><Money value={o.total} /></strong>
+                        </div>
+                        <OptionBody option={o} />
+                    </li>
+                );
+            })}
+        </ol>
+    );
+}
+
+/**
+ * Pick one option and confirm. Used by customers on their tracking page and by
+ * the shop for walk-in customers (who have no account).
+ */
+export function OptionPicker({ quotation, busy, onChoose, confirmLabel, noteLabel }) {
+    const { L, t, lang } = useI18n();
+    const [picked, setPicked] = useState(null);
+    const [note, setNote] = useState("");
+    const choice = quotation.options.find((o) => o.option_id === picked);
+    return (
+        <div className="stack">
+            <ol className="quote-options">
+                {quotation.options.map((o, index) => (
+                    <li key={o.option_id} className={`quote-option ${o.kind !== "REPAIR" ? "is-system" : ""} ${picked === o.option_id ? "is-picked" : ""}`}>
+                        <div className="quote-option-head">
+                            <label>
+                                <input type="radio" name={`option-${quotation.quotation_id}`} checked={picked === o.option_id} onChange={() => setPicked(o.option_id)} />
+                                <span><span className="faint">{index + 1}.</span> {optionTitle(o, t, lang)}</span>
+                            </label>
+                            <strong><Money value={o.total} /></strong>
+                        </div>
+                        <OptionBody option={o} />
+                    </li>
+                ))}
+            </ol>
+            {noteLabel && <TextField as="textarea" label={noteLabel} value={note} onChange={(e) => setNote(e.target.value)} />}
+            <div>
+                <button type="button" className="btn btn-primary" disabled={busy || !choice} onClick={() => onChoose(choice, note)}>
+                    {choice
+                        ? <>{confirmLabel || L("ยืนยันตัวเลือกนี้", "Confirm this option")} · <Money value={choice.total} /></>
+                        : L("เลือก 1 ตัวเลือก", "Pick one option")}
+                </button>
+            </div>
+        </div>
+    );
+}
+
+/** How long a ready device is kept for free, and whether that time is up. */
+export function PickupNote({ workOrder }) {
+    const { L, fmt } = useI18n();
+    const p = workOrder.pickup;
+    if (!p || workOrder.handed_over_at) return null;
+    return p.overdue ? (
+        <div className="notice warn small">
+            {L(`เกินเวลาเก็บเครื่องฟรี ${p.days_overdue} วัน (ครบกำหนด ${fmt.date(p.free_until)}) โทรตามลูกค้าให้มารับเครื่อง`, `Free storage ended ${p.days_overdue} day(s) ago (${fmt.date(p.free_until)}). Call the customer to collect it.`)}
+        </div>
+    ) : (
+        <p className="small muted">
+            {L(`เก็บเครื่องให้ฟรี ${p.free_days} วัน ถึง ${fmt.date(p.free_until)}`, `Kept free for ${p.free_days} days, until ${fmt.date(p.free_until)}`)}
+        </p>
     );
 }
 

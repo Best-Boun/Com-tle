@@ -33,7 +33,7 @@ export default function AdminWorkOrders() {
                     <option value="OPEN">{L("งานที่เปิดอยู่", "Open jobs")}</option>
                     <option value="READY">{L("ซ่อมเสร็จ รอส่งมอบ", "Ready for handover")}</option>
                     <option value="">{t("common.all")}</option>
-                    {["PENDING", "DIAGNOSING", "WAITING_APPROVAL", "APPROVED", "REPAIRING", "TESTING", "COMPLETED", "CANCELLED"].map((s) => <option key={s} value={s}>{t(`status.wo.${s}`)}</option>)}
+                    {["PENDING", "DIAGNOSING", "WAITING_APPROVAL", "APPROVED", "WAITING_PARTS", "REPAIRING", "TESTING", "COMPLETED", "CANCELLED"].map((s) => <option key={s} value={s}>{t(`status.wo.${s}`)}</option>)}
                 </TextField>
                 <TextField type="search" label={t("common.search")} placeholder={L("เลขใบงาน ชื่อ เบอร์โทร รุ่น", "Number, name, phone, model")} value={search} onChange={(e) => setFilter("q", e.target.value)} />
             </div>

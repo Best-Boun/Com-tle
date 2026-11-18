@@ -20,6 +20,7 @@ export const DICT = {
         "status.wo.DIAGNOSING": "กำลังตรวจเช็ก",
         "status.wo.WAITING_APPROVAL": "รออนุมัติราคา",
         "status.wo.APPROVED": "อนุมัติแล้ว",
+        "status.wo.WAITING_PARTS": "รออะไหล่",
         "status.wo.REPAIRING": "กำลังซ่อม",
         "status.wo.TESTING": "กำลังทดสอบ",
         "status.wo.COMPLETED": "รอรับเครื่อง",
@@ -33,6 +34,9 @@ export const DICT = {
 
         "quote.kind.INITIAL": "ใบเสนอราคา",
         "quote.kind.ADDITIONAL": "งานเพิ่มเติม",
+        "option.kind.REPAIR": "ซ่อม",
+        "option.kind.NO_REPAIR": "ไม่ซ่อม",
+        "option.kind.SKIP_EXTRA": "ไม่ทำงานเพิ่ม",
 
         "status.pay.UNPAID": "ยังไม่ชำระ",
         "status.pay.PARTIAL": "ชำระบางส่วน",
@@ -89,6 +93,7 @@ export const DICT = {
         "status.wo.DIAGNOSING": "Diagnosing",
         "status.wo.WAITING_APPROVAL": "Awaiting approval",
         "status.wo.APPROVED": "Approved",
+        "status.wo.WAITING_PARTS": "Waiting for parts",
         "status.wo.REPAIRING": "Repairing",
         "status.wo.TESTING": "Testing",
         "status.wo.COMPLETED": "Ready for pickup",
@@ -102,6 +107,9 @@ export const DICT = {
 
         "quote.kind.INITIAL": "Quotation",
         "quote.kind.ADDITIONAL": "Additional work",
+        "option.kind.REPAIR": "Repair",
+        "option.kind.NO_REPAIR": "No repair",
+        "option.kind.SKIP_EXTRA": "Skip the extra work",
 
         "status.pay.UNPAID": "Unpaid",
         "status.pay.PARTIAL": "Partly paid",
@@ -146,7 +154,7 @@ export const DICT = {
 /** Badge colour per status: amber = waiting on someone, blue = in progress, green = done. */
 export const TONES = {
     booking: { AWAITING_DEPOSIT: "grey", PENDING: "amber", CONFIRMED: "blue", COMPLETED: "green", CANCELLED: "grey", NO_SHOW: "red" },
-    wo: { PENDING: "grey", DIAGNOSING: "blue", WAITING_APPROVAL: "amber", APPROVED: "blue", REPAIRING: "blue", TESTING: "blue", COMPLETED: "green", CANCELLED: "grey", HANDED_OVER: "green" },
+    wo: { PENDING: "grey", DIAGNOSING: "blue", WAITING_APPROVAL: "amber", APPROVED: "blue", WAITING_PARTS: "amber", REPAIRING: "blue", TESTING: "blue", COMPLETED: "green", CANCELLED: "grey", HANDED_OVER: "green" },
     quote: { DRAFT: "grey", SENT: "amber", APPROVED: "green", REJECTED: "red" },
     pay: { UNPAID: "red", PARTIAL: "amber", PAID: "green", PARTIALLY_REFUNDED: "blue", REFUNDED: "grey" },
     refund: { REQUESTED: "amber", APPROVED: "blue", COMPLETED: "green", REJECTED: "grey" }

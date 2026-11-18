@@ -81,16 +81,15 @@ const repairRoutePatterns = [
     ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/diagnosis\\/start$`)],
     ["PUT", new RegExp(`^\\/work-orders\\/${UUID}\\/diagnosis$`)],
     ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/quotations$`)],
-    ["PUT", new RegExp(`^\\/quotations\\/${UUID}\\/send$`)],
-    ["POST", new RegExp(`^\\/quotations\\/${UUID}\\/(?:revise|decision)$`)],
+    ["POST", new RegExp(`^\\/quotations\\/${UUID}\\/decision$`)],
     ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/repair\\/start$`)],
     ["PUT", new RegExp(`^\\/work-orders\\/${UUID}\\/repair\\/result$`)],
-    ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/(?:tests|handover|cancel)$`)],
+    ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/(?:tests|handover|cancel|bill)$`)],
     ["GET", /^\/parts$/],
     ["POST", /^\/parts$/],
     ["GET", /^\/parts\/movements$/],
     ["POST", new RegExp(`^\\/parts\\/${UUID}\\/receive$`)],
-    ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/parts\\/issue$`)],
+    ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/parts\\/(?:issue|wait)$`)],
     ["GET", new RegExp(`^\\/work-orders\\/${UUID}$`)]
 ];
 

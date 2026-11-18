@@ -227,3 +227,69 @@
     font-size: var(--fs-md);
     font-weight: 700;
 }
+
+/* ---------- Quotation options (choose one) ---------- */
+.quote-options {
+    display: grid;
+    gap: var(--s3);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.quote-option {
+    border: 1px solid var(--line);
+    border-radius: var(--r-panel);
+    padding: var(--s3) var(--s4);
+    display: grid;
+    gap: var(--s2);
+    background: var(--surface);
+}
+
+.quote-option-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: var(--s2);
+}
+
+.quote-option-head label {
+    display: flex;
+    align-items: baseline;
+    gap: var(--s2);
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.quote-option.is-picked {
+    border-color: var(--green);
+    box-shadow: inset 0 0 0 1px var(--green);
+}
+
+.quote-option.is-chosen {
+    border-color: var(--green);
+    background: var(--green-tint);
+}
+
+.quote-option.is-system {
+    background: #f7f9f8;
+}
+
+.quote-option.is-faded {
+    opacity: 0.6;
+}
+
+.quote-option ul {
+    margin: 0;
+    padding-left: 18px;
+}
+
+/* ---------- Options editor (technician) ---------- */
+.option-editor {
+    border: 1px dashed var(--line);
+    border-radius: var(--r-panel);
+    padding: var(--s3) var(--s4);
+    display: grid;
+    gap: var(--s3);
+}

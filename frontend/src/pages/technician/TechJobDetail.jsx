@@ -5,7 +5,7 @@ import { api } from "../../api/index.js";
 import { useAsync } from "../../utils/useAsync.js";
 import { ErrorNotice, Loading, Stamp, TextField, useAction } from "../../components/ui.jsx";
 import { QuotationCard, WoHistory, deviceLabel } from "../../components/repair.jsx";
-import ItemsEditor, { blankItem, itemsValid, toPayload } from "../../components/ItemsEditor.jsx";
+import OptionsEditor, { blankOption, optionsPayload, optionsValid } from "../../components/OptionsEditor.jsx";
 
 export default function TechJobDetail() {
     const { workOrderId } = useParams();
@@ -15,8 +15,10 @@ export default function TechJobDetail() {
     const [run, busy] = useAction();
 
     const [diagnosis, setDiagnosis] = useState("");
-    const [items, setItems] = useState([blankItem("LABOR")]);
-    const [itemsNote, setItemsNote] = useState("");
+    const [options, setOptions] = useState(() => [blankOption()]);
+    const [quoteNote, setQuoteNote] = useState("");
+    const [partsNote, setPartsNote] = useState("");
+    const [showWaitParts, setShowWaitParts] = useState(false);
     const [result, setResult] = useState("");
     const [test, setTest] = useState({ passed: "yes", notes: "" });
     const [showAdditional, setShowAdditional] = useState(false);
@@ -37,24 +39,36 @@ export default function TechJobDetail() {
     if (wo.error) return <ErrorNotice error={wo.error} onRetry={wo.reload} />;
     const w = wo.data;
     const pendingQuote = w.quotations.find((q) => ["DRAFT", "SENT"].includes(q.status));
-    const canPropose = (w.status === "DIAGNOSING" && w.diagnosis && !pendingQuote) || (["APPROVED", "REPAIRING"].includes(w.status) && !w.quotations.some((q) => q.kind === "ADDITIONAL" && ["DRAFT", "SENT"].includes(q.status)));
+    const repairing = ["APPROVED", "WAITING_PARTS", "REPAIRING"].includes(w.status);
+    const canPropose = (w.status === "DIAGNOSING" && w.diagnosis && !pendingQuote) || (repairing && !w.quotations.some((q) => q.kind === "ADDITIONAL" && ["DRAFT", "SENT"].includes(q.status)));
 
     const proposeForm = (
         <div className="stack">
-            <ItemsEditor items={items} onChange={setItems} parts={parts.data || []} />
-            <TextField as="textarea" label={L("หมายเหตุถึงร้าน (ไม่บังคับ)", "Note for the shop (optional)")} value={itemsNote} onChange={(e) => setItemsNote(e.target.value)} />
+            <OptionsEditor options={options} onChange={setOptions} parts={parts.data || []} additional={w.status !== "DIAGNOSING"} />
+            <TextField as="textarea" label={L("ข้อความถึงลูกค้า (ไม่บังคับ)", "Message to the customer (optional)")} value={quoteNote} onChange={(e) => setQuoteNote(e.target.value)} />
             <div>
                 <button
                     type="button"
                     className="btn btn-primary"
-                    disabled={busy || !itemsValid(items, false)}
+                    disabled={busy || !optionsValid(options)}
                     onClick={() => act(
-                        () => api.repairs.proposeItems(w.work_order_id, { items: toPayload(items), note: itemsNote }),
-                        L("ส่งรายการให้ร้านตั้งราคาแล้ว", "Items sent for pricing"),
-                        () => { setItems([blankItem("LABOR")]); setItemsNote(""); setShowAdditional(false); }
+                        () => api.repairs.proposeQuotation(w.work_order_id, { options: optionsPayload(options), note: quoteNote.trim() || null }),
+                        L("ส่งตัวเลือกให้ลูกค้าแล้ว", "Options sent to the customer"),
+                        () => { setOptions([blankOption()]); setQuoteNote(""); setShowAdditional(false); }
                     )}
                 >
-                    {L("ส่งให้ร้านตั้งราคา", "Send for pricing")}
+                    {L("ส่งตัวเลือกให้ลูกค้า", "Send options to the customer")}
+                </button>
+            </div>
+        </div>
+    );
+
+    const waitPartsForm = (
+        <div className="stack">
+            <TextField label={L("รออะไหล่อะไร นานแค่ไหน", "Which part, and how long")} value={partsNote} onChange={(e) => setPartsNote(e.target.value)} placeholder={L("เช่น สั่งจอจากศูนย์ ประมาณ 3 วัน", "e.g. screen ordered from the service centre, about 3 days")} />
+            <div>
+                <button type="button" className="btn btn-secondary" disabled={busy || !partsNote.trim()} onClick={() => act(() => api.repairs.waitForParts(w.work_order_id, partsNote.trim()), L("แจ้งลูกค้าว่ารออะไหล่แล้ว", "Customer sees “waiting for parts”"), () => { setPartsNote(""); setShowWaitParts(false); })}>
+                    {L("ตั้งสถานะรออะไหล่", "Mark as waiting for parts")}
                 </button>
             </div>
         </div>
@@ -85,32 +99,29 @@ export default function TechJobDetail() {
 
                     {w.status === "DIAGNOSING" && (
                         <section className="action-panel">
-                            <h2>{L("ผลตรวจและรายการที่ต้องซ่อม", "Diagnosis and proposed work")}</h2>
+                            <h2>{L("ผลตรวจและตัวเลือกให้ลูกค้า", "Diagnosis and options")}</h2>
                             <TextField as="textarea" label={L("ผลการตรวจ", "Diagnosis")} value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)} placeholder={L("เช่น SSD เสีย อ่านไม่ได้ บอร์ดและจอปกติ", "e.g. SSD failed, board and screen OK")} />
                             <div>
                                 <button type="button" className="btn btn-secondary" disabled={busy || !diagnosis.trim() || diagnosis === w.diagnosis} onClick={() => act(() => api.repairs.saveDiagnosis(w.work_order_id, diagnosis), L("บันทึกผลตรวจแล้ว", "Diagnosis saved"))}>
                                     {L("บันทึกผลตรวจ", "Save diagnosis")}
                                 </button>
                             </div>
-                            {w.quotations.some((q) => q.status === "REJECTED") && !pendingQuote && (
-                                <div className="notice warn">{L("ลูกค้าไม่อนุมัติราคาฉบับก่อน ดูเหตุผลด้านล่างแล้วเสนอรายการใหม่ หรือรอร้านแก้ใบเสนอราคา", "The customer rejected the last quotation. Check their note below and propose new items, or wait for the shop to revise it.")}</div>
-                            )}
-                            {pendingQuote && <div className="notice info">{L("ส่งรายการแล้ว รอผู้ดูแลร้านตั้งราคาและส่งให้ลูกค้า", "Items sent. Waiting for the admin to price and send them.")}</div>}
+                            {pendingQuote && <div className="notice info">{L("มีใบเสนอราคาที่รอลูกค้าตอบอยู่", "A quotation is waiting for the customer.")}</div>}
                             {canPropose && (
                                 <>
-                                    <h3 style={{ fontSize: "var(--fs-md)" }}>{L("เสนอรายการซ่อมและอะไหล่", "Propose repair items and parts")}</h3>
-                                    <p className="muted small">{L("ไม่ต้องใส่ราคา ร้านจะตั้งราคาก่อนส่งให้ลูกค้าอนุมัติ", "No prices needed — the admin prices it before the customer approves.")}</p>
+                                    <h3 style={{ fontSize: "var(--fs-md)" }}>{L("เสนอตัวเลือกพร้อมราคาให้ลูกค้า", "Offer the customer priced options")}</h3>
+                                    <p className="muted small">{L("เขียนผลตรวจและตัวเลือกเป็นภาษาที่ลูกค้าอ่านเข้าใจ ลูกค้าจะเลือกเองบนเว็บ (ลูกค้า walk-in ร้านบันทึกให้)", "Write the diagnosis and options in plain words. The customer picks one online (the shop records it for walk-ins).")}</p>
                                     {proposeForm}
                                 </>
                             )}
-                            {!w.diagnosis && <p className="small faint">{L("บันทึกผลตรวจก่อน จึงจะเสนอรายการได้", "Save the diagnosis first to propose items.")}</p>}
+                            {!w.diagnosis && <p className="small faint">{L("บันทึกผลตรวจก่อน จึงจะเสนอตัวเลือกได้", "Save the diagnosis first to offer options.")}</p>}
                         </section>
                     )}
 
                     {w.status === "WAITING_APPROVAL" && (
                         <section className="action-panel calm">
-                            <h2>{L("รอลูกค้าอนุมัติราคา", "Waiting for the customer to approve")}</h2>
-                            <p className="muted small">{L("ยังไม่ต้องลงมือซ่อม งานจะขึ้นว่า “อนุมัติแล้ว” เมื่อลูกค้าตอบ", "Don't start yet — the job turns “Approved” when the customer answers.")}</p>
+                            <h2>{L("รอลูกค้าเลือกตัวเลือก", "Waiting for the customer to choose")}</h2>
+                            <p className="muted small">{L("ยังไม่ต้องลงมือซ่อม งานจะขึ้นว่า “อนุมัติแล้ว” เมื่อลูกค้าเลือกซ่อม หรือขึ้นว่า “รอรับเครื่อง” ถ้าลูกค้าไม่ซ่อม", "Don't start yet. The job turns “Approved” if they choose a repair, or “Ready for pickup” if they choose not to.")}</p>
                         </section>
                     )}
 
@@ -120,7 +131,19 @@ export default function TechJobDetail() {
                             {w.parts.some((p) => p.remaining_qty > 0) && (
                                 <div className="notice info">{L("ขอเบิกอะไหล่จากผู้ดูแลร้านก่อนเริ่ม (เบิกได้เฉพาะรายการที่อนุมัติ)", "Ask the admin to issue the approved parts before you start.")}</div>
                             )}
-                            <div><button type="button" className="btn btn-primary" disabled={busy} onClick={() => act(() => api.repairs.startRepair(w.work_order_id), L("เริ่มซ่อมแล้ว", "Repair started"))}>{L("เริ่มซ่อม", "Start repair")}</button></div>
+                            <div className="btn-row">
+                                <button type="button" className="btn btn-primary" disabled={busy} onClick={() => act(() => api.repairs.startRepair(w.work_order_id), L("เริ่มซ่อมแล้ว", "Repair started"))}>{L("เริ่มซ่อม", "Start repair")}</button>
+                                {!showWaitParts && <button type="button" className="btn btn-secondary" onClick={() => setShowWaitParts(true)}>{L("ต้องสั่งอะไหล่ก่อน", "Parts must be ordered first")}</button>}
+                            </div>
+                            {showWaitParts && waitPartsForm}
+                        </section>
+                    )}
+
+                    {w.status === "WAITING_PARTS" && (
+                        <section className="action-panel">
+                            <h2>{L("รออะไหล่", "Waiting for parts")}</h2>
+                            <p className="muted small">{L("ลูกค้าเห็นสถานะ “รออะไหล่” อยู่ กดเมื่ออะไหล่มาถึงและเริ่มซ่อม", "The customer sees “Waiting for parts”. Press when the parts arrive and you start.")}</p>
+                            <div><button type="button" className="btn btn-primary" disabled={busy} onClick={() => act(() => api.repairs.startRepair(w.work_order_id), L("เริ่มซ่อมแล้ว", "Repair started"))}>{L("อะไหล่มาแล้ว เริ่มซ่อม", "Parts are here — start repair")}</button></div>
                         </section>
                     )}
 
@@ -128,7 +151,11 @@ export default function TechJobDetail() {
                         <section className="action-panel">
                             <h2>{L("บันทึกผลการซ่อม", "Record the repair")}</h2>
                             <TextField as="textarea" label={L("สิ่งที่ทำไป", "What you did")} value={result} onChange={(e) => setResult(e.target.value)} placeholder={L("เช่น เปลี่ยน SSD 512GB ติดตั้ง Windows และย้ายข้อมูลครบ", "e.g. replaced SSD, installed Windows, restored data")} />
-                            <div><button type="button" className="btn btn-primary" disabled={busy || !result.trim()} onClick={() => act(() => api.repairs.recordResult(w.work_order_id, result), L("บันทึกแล้ว ไปขั้นทดสอบ", "Saved — now testing"))}>{L("ซ่อมเสร็จ ไปทดสอบ", "Done — move to testing")}</button></div>
+                            <div className="btn-row">
+                                <button type="button" className="btn btn-primary" disabled={busy || !result.trim()} onClick={() => act(() => api.repairs.recordResult(w.work_order_id, result), L("บันทึกแล้ว ไปขั้นทดสอบ", "Saved — now testing"))}>{L("ซ่อมเสร็จ ไปทดสอบ", "Done — move to testing")}</button>
+                                {!showWaitParts && <button type="button" className="btn btn-secondary" onClick={() => setShowWaitParts(true)}>{L("ต้องรออะไหล่", "Need to wait for parts")}</button>}
+                            </div>
+                            {showWaitParts && waitPartsForm}
                         </section>
                     )}
 
@@ -145,13 +172,13 @@ export default function TechJobDetail() {
                         </section>
                     )}
 
-                    {["APPROVED", "REPAIRING"].includes(w.status) && (
+                    {repairing && (
                         <section className="stack">
                             <div className="panel-head" style={{ marginBottom: 0 }}>
                                 <h2>{L("พบปัญหาเพิ่มเติม?", "Found another problem?")}</h2>
-                                {canPropose && !showAdditional && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowAdditional(true)}>{L("เสนองานเพิ่มเติม", "Propose additional work")}</button>}
+                                {canPropose && !showAdditional && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowAdditional(true)}>{L("เสนองานเพิ่มเติม", "Offer additional work")}</button>}
                             </div>
-                            <p className="muted small">{L("งานเดิมที่อนุมัติแล้วทำต่อได้ งานเพิ่มต้องรอลูกค้าอนุมัติก่อน", "Keep going with approved work. Extra work waits for the customer's approval.")}</p>
+                            <p className="muted small">{L("งานเดิมที่อนุมัติแล้วทำต่อได้ งานเพิ่มต้องรอลูกค้าเลือกก่อน", "Keep going with approved work. Extra work waits for the customer's choice.")}</p>
                             {showAdditional && canPropose && proposeForm}
                         </section>
                     )}

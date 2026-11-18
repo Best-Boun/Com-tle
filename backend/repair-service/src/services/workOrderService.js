@@ -8,9 +8,9 @@ const {
     assignTechnicianSchema,
     createWalkInSchema,
     diagnosisSchema,
-    proposeItemsSchema,
-    priceAndSendSchema,
+    quotationOptionsSchema,
     decisionSchema,
+    waitPartsSchema,
     testResultSchema,
     handoverSchema,
     cancelSchema,
@@ -19,13 +19,16 @@ const {
     issuePartSchema,
     partMovementQuerySchema
 } = require("../validators/workOrderSchemas");
+const { loadWorkflowConfig } = require("../config/workflowConfig");
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const API_STATUSES = {
     RECEIVED: "PENDING",
     DIAGNOSING: "DIAGNOSING",
     WAITING_APPROVAL: "WAITING_APPROVAL",
     APPROVED: "APPROVED",
-    WAITING_PARTS: "APPROVED",
+    WAITING_PARTS: "WAITING_PARTS",
     IN_REPAIR: "REPAIRING",
     TESTING: "TESTING",
     RETURN_PENDING: "COMPLETED",
@@ -43,14 +46,49 @@ function mapStatus(status) {
     return API_STATUSES[status];
 }
 
+function approvedTotal(workOrder) {
+    return (workOrder.quotations || [])
+        .filter((quotation) => quotation.status === "APPROVED")
+        .reduce((sum, quotation) => sum + Number(quotation.total || 0), 0);
+}
+
+/**
+ * @param payment            optional Payment-Service client used to keep the
+ *                           bill in step with the approved quotations:
+ *                           { getBalance(workOrderId, authorization) -> balance | null,
+ *                             registerBill(bill, authorization) -> balance }
+ * @param resolveCustomerId  (userId, authorization) -> User-Service customer_id,
+ *                           for work orders that belong to a registered customer
+ */
 function createWorkOrderService({
     workOrderRepository,
     getPaymentBalance,
+    payment = null,
+    resolveCustomerId = null,
+    rules = loadWorkflowConfig(),
     createId = randomUUID,
     now = () => new Date()
 } = {}) {
     if (!workOrderRepository) {
         throw new Error("Work order repository is required");
+    }
+
+    // Free storage starts when the device is ready; after that the dashboard
+    // asks the shop to call the customer. No storage fee is charged.
+    function pickup(workOrder) {
+        if (workOrder.status !== "RETURN_PENDING" || !workOrder.ready_at) {
+            return null;
+        }
+        const readyAt = new Date(workOrder.ready_at);
+        const freeUntil = new Date(readyAt.getTime() + rules.freeStorageDays * DAY_MS);
+        const overdueMs = now().getTime() - freeUntil.getTime();
+        return {
+            ready_at: readyAt.toISOString(),
+            free_until: freeUntil.toISOString(),
+            free_days: rules.freeStorageDays,
+            overdue: overdueMs > 0,
+            days_overdue: overdueMs > 0 ? Math.max(1, Math.floor(overdueMs / DAY_MS)) : 0
+        };
     }
 
     function present(workOrder, fallbackHistory = []) {
@@ -65,6 +103,8 @@ function createWorkOrderService({
             },
             ...workOrder,
             status: mapStatus(workOrder.status),
+            repair_declined: Boolean(workOrder.repair_declined),
+            pickup: pickup(workOrder),
             work_order_number: workOrder.work_order_number
                 || `WO-${workOrder.work_order_id.replace(/-/g, "").slice(0, 10).toUpperCase()}`,
             created_at: workOrder.received_at || workOrder.created_at,
@@ -253,6 +293,9 @@ function createWorkOrderService({
         if (result.notAssigned || result.forbidden) {
             throw new AppError("You do not have permission for this work order", 403);
         }
+        if (result.optionNotFound) {
+            throw new AppError("Option not found on this quotation", 404);
+        }
         if (result.missingDiagnosis) {
             throw new AppError("Record the diagnosis before proposing repair items", 409);
         }
@@ -332,51 +375,86 @@ function createWorkOrderService({
         return runTechnicianStep("saveDiagnosis", workOrderId, user, parsed);
     }
 
-    async function proposeItems(workOrderId, input, user) {
+    async function proposeQuotation(workOrderId, input, user) {
         requirePermission(user, PERMISSIONS.REPAIR_ITEM_PROPOSE);
-        const data = parseInput(proposeItemsSchema, input, "Invalid proposed repair items");
-        return runTechnicianStep("proposeItems", workOrderId, user, data, data.items);
-    }
-
-    async function priceAndSend(quotationId, input, user) {
-        requirePermission(user, PERMISSIONS.QUOTATION_SET_PRICE);
-        const data = parseInput(priceAndSendSchema, input, "Invalid quotation prices");
-        if (!data.items.some((item) => item.unit_price > 0)) {
-            throw new AppError("Quotation total must be greater than zero", 400);
+        const data = parseInput(quotationOptionsSchema, input, "Invalid quotation options");
+        for (const option of data.options) {
+            const total = option.items.reduce((sum, item) => sum + item.qty * item.unit_price, 0);
+            if (total <= 0) {
+                throw new AppError("Every option needs a total greater than zero", 400);
+            }
         }
-        const result = unwrapResult(await workOrderRepository.priceAndSend(
-            quotationId,
-            user.userId,
-            data.items,
-            data.note
-        ));
-        return present(result);
-    }
-
-    async function reviseQuotation(quotationId, user) {
-        requirePermission(user, PERMISSIONS.QUOTATION_SET_PRICE);
-        return present(unwrapResult(
-            await workOrderRepository.reviseQuotation(quotationId, user.userId)
-        ));
+        return runTechnicianStep("proposeQuotation", workOrderId, user, data, rules);
     }
 
     async function decideQuotation(quotationId, input, user) {
         const data = parseInput(decisionSchema, input, "Invalid quotation decision");
-        requirePermission(
-            user,
-            user.roles.includes("ADMIN")
-                ? PERMISSIONS.QUOTATION_APPROVE_WALK_IN
-                : data.approve
-                    ? PERMISSIONS.QUOTATION_APPROVE_OWN
-                    : PERMISSIONS.QUOTATION_REJECT_OWN
-        );
+        if (user.roles.includes("ADMIN")) {
+            requirePermission(user, PERMISSIONS.QUOTATION_APPROVE_WALK_IN);
+        } else if (!hasPermission(user, PERMISSIONS.QUOTATION_APPROVE_OWN)
+            && !hasPermission(user, PERMISSIONS.QUOTATION_REJECT_OWN)) {
+            throw new AppError("You do not have permission", 403);
+        }
         const result = unwrapResult(await workOrderRepository.decideQuotation(
             quotationId,
             user,
-            data.approve,
+            data.option_id,
             data.note
         ));
         return present(result);
+    }
+
+    async function waitForParts(workOrderId, input, user) {
+        requirePermission(user, PERMISSIONS.REPAIR_START);
+        const data = parseInput(waitPartsSchema, input, "Say which part is on order");
+        return runTechnicianStep("markWaitingParts", workOrderId, user, data.note);
+    }
+
+    // Registers (or re-versions) the Payment-Service bill so it matches the
+    // approved quotations. The total is worked out here from Repair data, never
+    // taken from the browser.
+    async function syncBillFor(workOrder, authorization) {
+        if (!payment) {
+            throw new AppError("Payment Service is unavailable", 503);
+        }
+        const total = approvedTotal(workOrder);
+        if (!Number.isSafeInteger(total) || total <= 0) {
+            return null;
+        }
+        const current = await payment.getBalance(workOrder.work_order_id, authorization);
+        if (current && Number(current.bill_total) === total) {
+            return current;
+        }
+        let customerId = workOrder.customer_id;
+        if (workOrder.source !== "WALK_IN") {
+            if (typeof resolveCustomerId !== "function") {
+                throw new AppError("User Service is unavailable", 503);
+            }
+            customerId = await resolveCustomerId(workOrder.customer_id, authorization);
+        }
+        return payment.registerBill({
+            work_order_id: workOrder.work_order_id,
+            bill_id: workOrder.work_order_id,
+            bill_version: Number(current?.bill_version || 0) + 1,
+            customer_id: customerId,
+            total_amount: total
+        }, authorization);
+    }
+
+    async function syncBill(workOrderId, user, authorization) {
+        requirePermission(user, PERMISSIONS.HANDOVER_COMPLETE);
+        const workOrder = await workOrderRepository.findById(workOrderId);
+        if (!workOrder) {
+            throw new AppError("Work order not found", 404);
+        }
+        if (workOrder.status === "ABANDONED") {
+            throw new AppError("Work order is cancelled", 409);
+        }
+        const balance = await syncBillFor(workOrder, authorization);
+        if (!balance) {
+            throw new AppError("There is no approved quotation yet", 409);
+        }
+        return balance;
     }
 
     async function startRepair(workOrderId, user) {
@@ -408,10 +486,18 @@ function createWorkOrderService({
             throw new AppError("Payment Service is unavailable", 503);
         }
         const data = parseInput(handoverSchema, input, "Invalid handover details");
-        if (!await workOrderRepository.findById(workOrderId)) {
+        const workOrder = await workOrderRepository.findById(workOrderId);
+        if (!workOrder) {
             throw new AppError("Work order not found", 404);
         }
-        const balance = await getPaymentBalance(workOrderId, authorization);
+        // Nothing approved means nothing to bill (e.g. a free "no repair").
+        const nothingToBill = payment && approvedTotal(workOrder) <= 0;
+        if (payment && !nothingToBill) {
+            await syncBillFor(workOrder, authorization);
+        }
+        const balance = nothingToBill
+            ? { outstanding_balance: 0 }
+            : await getPaymentBalance(workOrderId, authorization);
         const outstanding = Number(balance?.outstanding_balance);
         if (!Number.isSafeInteger(outstanding) || outstanding < 0) {
             throw new AppError("Payment balance is invalid", 502);
@@ -512,10 +598,10 @@ function createWorkOrderService({
         get,
         startDiagnosis,
         saveDiagnosis,
-        proposeItems,
-        priceAndSend,
-        reviseQuotation,
+        proposeQuotation,
         decideQuotation,
+        waitForParts,
+        syncBill,
         startRepair,
         recordResult,
         recordTest,
