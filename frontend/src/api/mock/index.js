@@ -736,6 +736,29 @@ export const repairs = {
         return respond(presentWo(wo), 350);
     }),
 
+    /** Received devices nobody has taken yet, oldest first (mirrors GET /work-orders/queue). */
+    queue: handler(async () => {
+        requireRole("TECHNICIAN", "ADMIN");
+        const items = getDb().workOrders
+            .filter((w) => w.status === "PENDING" && !w.technician_id)
+            .sort((a, b) => a.created_at.localeCompare(b.created_at));
+        return respond(items.map((w) => presentWo(w)));
+    }),
+
+    /** A technician takes a job from the queue: first come, first served. */
+    claim: handler(async (woId) => {
+        const user = requireRole("TECHNICIAN");
+        const wo = getDb().workOrders.find((w) => w.work_order_id === woId);
+        if (!wo) throw bad("ไม่พบใบงาน", "Work order not found", 404);
+        if (wo.technician_id === user.user_id) return respond(presentWo(wo, { detail: true }));
+        if (wo.technician_id) throw bad("ช่างคนอื่นรับงานนี้ไปแล้ว", "Another technician has already taken this job", 409);
+        if (wo.status !== "PENDING") throw bad("งานนี้ไม่อยู่ในคิวแล้ว", "This job is no longer in the queue", 409);
+        wo.technician_id = user.user_id;
+        wo.updated_at = now();
+        getDb().workOrderHistory.push({ id: newId(), work_order_id: wo.work_order_id, old_status: wo.status, new_status: wo.status, changed_by: user.user_id, note: `${user.full_name} รับงานจากคิว`, created_at: now() });
+        return respond(presentWo(wo, { detail: true }));
+    }),
+
     assignTechnician: handler(async (woId, technicianId) => {
         const user = requireRole("ADMIN");
         const wo = loadWo(woId, user);

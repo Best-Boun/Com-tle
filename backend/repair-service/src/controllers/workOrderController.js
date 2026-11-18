@@ -32,6 +32,16 @@ function createWorkOrderController(workOrderService) {
             res.status(200).json(successResponse("Assigned work orders retrieved", workOrders));
         }),
 
+        listQueue: handle(async (req, res) => {
+            const workOrders = await workOrderService.listQueue(req.user);
+            res.status(200).json(successResponse("Technician queue retrieved", workOrders));
+        }),
+
+        claim: handle(async (req, res) => {
+            const workOrder = await workOrderService.claim(req.params.workOrderId, req.user);
+            res.status(200).json(successResponse("Job taken", workOrder));
+        }),
+
         assignTechnician: handle(async (req, res) => {
             const workOrder = await workOrderService.assignTechnician(
                 req.params.workOrderId,

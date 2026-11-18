@@ -47,7 +47,7 @@ function createHarness() {
         async listAssigned(id) {
             return workOrders.filter((item) => item.technician_id === id);
         },
-        async assignTechnician(workOrderId, technicianId) {
+        async assignTechnician(workOrderId, technicianId, { onlyIfFree = false } = {}) {
             const workOrder = workOrders.find((item) => item.work_order_id === workOrderId);
             if (!workOrder) {
                 return { notFound: true };
@@ -55,8 +55,20 @@ function createHarness() {
             if (["RETURN_PENDING", "HANDED_OVER", "ABANDONED"].includes(workOrder.status)) {
                 return { closed: true };
             }
+            if (workOrder.technician_id === technicianId) {
+                return { workOrder };
+            }
+            if (onlyIfFree && workOrder.technician_id) {
+                return { taken: true };
+            }
+            if (onlyIfFree && workOrder.status !== "RECEIVED") {
+                return { notInQueue: true };
+            }
             workOrder.technician_id = technicianId;
             return { workOrder };
+        },
+        async listUnassigned() {
+            return workOrders.filter((item) => !item.technician_id && item.status === "RECEIVED");
         },
         async listAll() {
             return [...workOrders];
@@ -167,6 +179,34 @@ test("rejects invalid technician IDs and closed or missing work orders", async (
         }, admin),
         { statusCode: 409 }
     );
+});
+
+test("technicians take received jobs from the queue, first come first served", async () => {
+    const { service, workOrders } = createHarness();
+    const admin = { userId: ADMIN_ID, roles: ["ADMIN"] };
+    const technician = { userId: TECHNICIAN_ID, roles: ["TECHNICIAN"] };
+    const otherTechnician = { userId: "6a4b2614-3ed2-4ed7-a720-f23b6b707db5", roles: ["TECHNICIAN"] };
+    const created = await service.createFromBooking(booking, admin);
+
+    assert.deepEqual((await service.listQueue(technician)).map((w) => w.work_order_id), [created.work_order_id]);
+    assert.equal((await service.listQueue(admin)).length, 1);
+    await assert.rejects(service.listQueue({ userId: CUSTOMER_ID, roles: ["CUSTOMER"] }), { statusCode: 403 });
+
+    // Only technicians take jobs; the shop assigns instead.
+    await assert.rejects(service.claim(created.work_order_id, admin), { statusCode: 403 });
+
+    const taken = await service.claim(created.work_order_id, technician);
+    assert.equal(taken.technician_id, TECHNICIAN_ID);
+    assert.equal((await service.claim(created.work_order_id, technician)).technician_id, TECHNICIAN_ID);
+    await assert.rejects(service.claim(created.work_order_id, otherTechnician), { statusCode: 409 });
+    assert.equal((await service.listQueue(technician)).length, 0);
+
+    await assert.rejects(service.claim("8d4a9eb2-e361-4e27-aab1-64255e7d02b1", technician), { statusCode: 404 });
+
+    // A job that already moved on is no longer in the queue.
+    workOrders[0].technician_id = null;
+    workOrders[0].status = "DIAGNOSING";
+    await assert.rejects(service.claim(created.work_order_id, otherTechnician), { statusCode: 409 });
 });
 
 test("technician workflow rejects a work order without an active assignment", async () => {

@@ -140,7 +140,7 @@ const STAFF_NAV = {
     ],
     TECHNICIAN: [
         { to: "/tech", end: true, icon: Icon.Clipboard, th: "งานของฉัน", en: "My jobs" },
-        { to: "/tech/queue", icon: Icon.Calendar, th: "คิวที่จะเข้ามา", en: "Upcoming queue" },
+        { to: "/tech/queue", icon: Icon.Clipboard, th: "คิวงานรอช่าง", en: "Job queue" },
         { to: "/tech/parts", icon: Icon.Box, th: "อะไหล่ในร้าน", en: "Parts in stock" }
     ]
 };

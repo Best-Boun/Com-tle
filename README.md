@@ -55,7 +55,7 @@ flowchart LR
 | User Service | 3001 | `user_db` | สมัครสมาชิก, เข้าสู่ระบบ, ออก/ต่ออายุ/ยกเลิกโทเคน, โปรไฟล์, บทบาทและสิทธิ์ (RBAC), ผู้ดูแลจัดการบัญชี (เปิด/ปิดบัญชี, เปลี่ยนบทบาท 1 บัญชี 1 บทบาท), รวมบัญชีลูกค้าที่ซ้ำ |
 | Booking Service | 3002 | `booking_db` | แจ้งซ่อมล่วงหน้า (เครื่อง + กลุ่มอาการ ไม่มีการเลือกเวลา) ได้เลข RQ, หน้าร้านค้นจากเลข RQ หรือเบอร์โทร, ยกเลิก พร้อมเก็บประวัติสถานะ, รับเครื่อง (check-in) แล้วสั่งเปิดใบงานซ่อม |
 | Service Catalog Service | 3003 | `catalog_db` | หมวดบริการและรายการบริการ พร้อมราคาเริ่มต้น (บาท) และเวลาโดยประมาณ, เปิด/ปิดบริการ, บันทึก audit log ทุกการแก้ไข |
-| Repair Service | 3004 | `repair_db` | ใบงานซ่อม (Work Order) ทั้งจากการจองและ walk-in, มอบหมายช่าง, วินิจฉัย, ใบเสนอราคา (ส่ง/แก้ไข/ลูกค้าตัดสินใจ), ซ่อม, ทดสอบ, ส่งมอบ (เช็กยอดค้างกับ Payment), ยกเลิก, คลังอะไหล่และการเบิก |
+| Repair Service | 3004 | `repair_db` | ใบงานซ่อม (Work Order) ทั้งจากคำขอแจ้งซ่อมและ walk-in, คิวงานรอช่าง (ช่างกดรับเอง) และมอบหมายช่าง, วินิจฉัย, ใบเสนอราคา (ส่ง/แก้ไข/ลูกค้าตัดสินใจ), ซ่อม, ทดสอบ, ส่งมอบ (เช็กยอดค้างกับ Payment), ยกเลิก, คลังอะไหล่และการเบิก |
 | Inventory Service | 3005 | `inventory_db` | คลังอะไหล่ (โครงพร้อมแล้ว ยังไม่เปิดผ่าน Gateway ตอนนี้ Repair Service ดูแลอะไหล่) |
 | Payment Service | 3006 | `payment_db` | บิลตามใบงาน, รับชำระที่ร้าน (แบ่งจ่ายได้), **ชำระออนไลน์** (PromptPay/บัตร แบบจำลอง), ยอดค้างชำระ, ล็อกการชำระ, ยกเลิกรายการชำระ, คืนเงินแบบ 2 คน (ขอ → อนุมัติ → ดำเนินการ) |
 
@@ -215,11 +215,13 @@ Endpoint ภายใน (เรียกได้เฉพาะระหว่
 
 | Method | Endpoint | ผู้ใช้ | คำอธิบาย |
 |---|---|---|---|
-| POST | `/api/repairs/work-orders` | Booking Service / ADMIN | เปิดใบงานจากการจอง (ส่ง `technician_user_id` มาด้วยได้ เพื่อมอบหมายช่างทันที) |
+| POST | `/api/repairs/work-orders` | Booking Service / ADMIN | เปิดใบงานจากคำขอแจ้งซ่อม (ใบงานเข้าคิวงานรอช่าง) |
 | POST | `/api/repairs/work-orders/walk-in` | ADMIN | เปิดใบงานลูกค้า walk-in |
 | GET | `/api/repairs/work-orders` | ADMIN | ใบงานทั้งหมด |
 | GET | `/api/repairs/work-orders/me` | CUSTOMER | ใบงานของฉัน |
 | GET | `/api/repairs/work-orders/assigned` | TECHNICIAN | งานที่ได้รับมอบหมาย |
+| GET | `/api/repairs/work-orders/queue` | TECHNICIAN / ADMIN | คิวงานรอช่าง: เครื่องที่รับแล้วแต่ยังไม่มีช่างรับ (รอนานสุดก่อน) |
+| POST | `/api/repairs/work-orders/:workOrderId/claim` | TECHNICIAN | ช่างรับงานจากคิวเอง ใครกดก่อนได้ก่อน (มีคนรับแล้ว 409) |
 | GET | `/api/repairs/work-orders/:workOrderId` | ผู้เกี่ยวข้อง | รายละเอียดใบงาน |
 | POST | `/api/repairs/work-orders/:workOrderId/assign` | ADMIN | มอบหมาย/เปลี่ยนช่าง |
 | POST | `/api/repairs/work-orders/:workOrderId/diagnosis/start` | TECHNICIAN | เริ่มวินิจฉัย |

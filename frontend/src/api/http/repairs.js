@@ -13,6 +13,16 @@ export const repairs = {
         return request(`${ROOT}/assigned`);
     },
 
+    /** Received devices nobody has taken yet (oldest first). */
+    async queue() {
+        return request(`${ROOT}/queue`);
+    },
+
+    /** A technician takes a job from the queue; 409 if someone was faster. */
+    async claim(workOrderId) {
+        return request(`${ROOT}/${encodeURIComponent(workOrderId)}/claim`, { method: "POST" });
+    },
+
     async listAll({ status, search } = {}) {
         return request(`${ROOT}${query({ status, search })}`);
     },

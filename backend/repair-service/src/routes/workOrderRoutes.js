@@ -35,6 +35,19 @@ function createWorkOrderRouter({ workOrderService, authenticate }) {
         requireAnyPermission(PERMISSIONS.REPAIR_HISTORY_VIEW_ASSIGNED),
         controller.listAssigned
     );
+    // Technicians' queue: received devices nobody has taken yet (the shop sees it too).
+    router.get(
+        "/work-orders/queue",
+        authenticate,
+        requireAnyPermission(PERMISSIONS.REPAIR_HISTORY_VIEW_ASSIGNED, PERMISSIONS.WORK_ORDER_ASSIGN_TECHNICIAN),
+        controller.listQueue
+    );
+    router.post(
+        "/work-orders/:workOrderId/claim",
+        authenticate,
+        requireAnyPermission(PERMISSIONS.DIAGNOSIS_RECORD),
+        controller.claim
+    );
     router.post(
         "/work-orders/:workOrderId/assign",
         authenticate,
