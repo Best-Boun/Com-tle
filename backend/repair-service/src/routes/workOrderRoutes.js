@@ -42,6 +42,13 @@ function createWorkOrderRouter({ workOrderService, authenticate }) {
         requireAnyPermission(PERMISSIONS.REPAIR_HISTORY_VIEW_ASSIGNED, PERMISSIONS.WORK_ORDER_ASSIGN_TECHNICIAN),
         controller.listQueue
     );
+    // Task 12: open a warranty claim work order for a repaired device.
+    router.post(
+        "/work-orders/:workOrderId/warranty-claims",
+        authenticate,
+        requireAnyPermission(PERMISSIONS.WORK_ORDER_RECEIVE_CREATE),
+        controller.createWarrantyClaim
+    );
     router.post(
         "/work-orders/:workOrderId/claim",
         authenticate,

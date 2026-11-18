@@ -118,6 +118,36 @@ function createBookingRepository(db) {
         },
 
         /**
+         * Close open requests made before `cutoff` (nobody brought the device in):
+         * status EXPIRED plus a history row each. Rows are locked first, so a
+         * check-in at the same moment either wins or sees the request expired;
+         * running it on two instances at once expires each request only once.
+         */
+        async expireOpenBefore(cutoff, { reason, createId, at }) {
+            return db.transaction(async (trx) => {
+                const rows = await trx("bookings")
+                    .select("booking_id", "status")
+                    .whereIn("status", OPEN_STATUSES)
+                    .where("created_at", "<", cutoff)
+                    .forUpdate();
+                if (rows.length === 0) return 0;
+                await trx("bookings")
+                    .whereIn("booking_id", rows.map((r) => r.booking_id))
+                    .whereIn("status", OPEN_STATUSES)
+                    .update({ status: "EXPIRED", updated_at: at });
+                await trx("booking_status_history").insert(rows.map((r) => ({
+                    history_id: createId(),
+                    booking_id: r.booking_id,
+                    old_status: r.status,
+                    new_status: "EXPIRED",
+                    changed_by: null,
+                    reason
+                })));
+                return rows.length;
+            });
+        },
+
+        /**
          * Change status only if the booking is still in `fromStatus`.
          * Returns false when someone else changed it first.
          */

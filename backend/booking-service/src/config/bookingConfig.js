@@ -49,8 +49,10 @@ function loadBookingConfig(env = process.env) {
         diagnosisServiceId,
         // How many open requests one customer may have at a time.
         maxOpenRequestsPerCustomer: positiveInteger(env, "REQUEST_MAX_OPEN_PER_CUSTOMER", 5),
-        // Requests nobody brought in are closed after this many days (job: task 2).
+        // Requests nobody brought in are closed after this many days (task 2),
+        // checked every expiryCheckMinutes.
         requestExpiryDays: positiveInteger(env, "REQUEST_EXPIRY_DAYS", 30),
+        expiryCheckMinutes: positiveInteger(env, "REQUEST_EXPIRY_CHECK_MINUTES", 60),
         catalogServiceUrl: serviceUrl(env, "CATALOG_SERVICE_URL"),
         repairServiceUrl: serviceUrl(env, "REPAIR_SERVICE_URL"),
         serviceCallTimeoutMs: positiveInteger(env, "SERVICE_CALL_TIMEOUT_MS", 5000)

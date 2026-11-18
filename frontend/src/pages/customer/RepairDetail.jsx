@@ -6,6 +6,7 @@ import { useAsync } from "../../utils/useAsync.js";
 import { ErrorNotice, Loading, Money, Stamp, useAction } from "../../components/ui.jsx";
 import { OptionPicker, PaymentSummary, PickupNote, QuotationCard, RepairProgress, WoHistory, deviceLabel } from "../../components/repair.jsx";
 import Checkout from "../../components/Checkout.jsx";
+import { WarrantyNotice } from "../../components/Warranty.jsx";
 
 export default function RepairDetail() {
     const { workOrderId } = useParams();
@@ -48,6 +49,7 @@ export default function RepairDetail() {
             </div>
 
             <RepairProgress status={w.status} handedOver={Boolean(w.handed_over_at)} declined={w.repair_declined} />
+            <WarrantyNotice w={w} base="/my/repairs" />
 
             {pending.length > 0 && (
                 <div className="notice warn" role="status">

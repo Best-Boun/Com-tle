@@ -26,6 +26,7 @@ const OPEN_WO = ["PENDING", "DIAGNOSING", "WAITING_APPROVAL", "APPROVED", "WAITI
 // Shop rules (Repair-Service reads them from NO_REPAIR_FEE / FREE_STORAGE_DAYS).
 const NO_REPAIR_FEE = 300;
 const FREE_STORAGE_DAYS = 7;
+const WARRANTY_DAYS = 90;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------- helpers
@@ -410,6 +411,18 @@ function matchesSearch(b, search) {
 
 const newestFirst = (a, b) => b.created_at.localeCompare(a.created_at);
 
+/** Like booking-service's timer: requests nobody brought in within 30 days expire. */
+const REQUEST_EXPIRY_DAYS = 30;
+function expireStaleRequests() {
+    const cutoff = Date.now() - REQUEST_EXPIRY_DAYS * 86400000;
+    for (const b of getDb().bookings) {
+        if (OPEN_BOOKING.includes(b.status) && new Date(b.created_at).getTime() < cutoff) {
+            getDb().bookingHistory.push({ history_id: newId(), booking_id: b.booking_id, old_status: b.status, new_status: "EXPIRED", changed_by: null, reason: `No device brought in within ${REQUEST_EXPIRY_DAYS} days`, created_at: now() });
+            Object.assign(b, { status: "EXPIRED", updated_at: now() });
+        }
+    }
+}
+
 export const bookings = {
     config: SHOP,
 
@@ -470,6 +483,7 @@ export const bookings = {
 
     listMine: handler(async ({ status } = {}) => {
         const user = requireRole("CUSTOMER");
+        expireStaleRequests();
         let items = getDb().bookings.filter((b) => b.customer_id === user.user_id);
         if (status) items = items.filter((b) => b.status === status);
         return respond(items.sort(newestFirst).map(presentBooking));
@@ -478,6 +492,7 @@ export const bookings = {
     /** The shop: newest first; search = request number (RQ-...) or phone. */
     listAll: handler(async ({ status, date, search } = {}) => {
         requireRole("ADMIN");
+        expireStaleRequests();
         let items = getDb().bookings.map(presentBooking);
         if (status) items = items.filter((b) => b.status === status);
         if (date) items = items.filter((b) => new Date(new Date(b.created_at).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10) === date);
@@ -616,12 +631,28 @@ function pickupOf(wo) {
     };
 }
 
+/** Task 11: a repaired device is under warranty for 90 days from handover. */
+function warrantyOf(wo) {
+    if (!wo.handed_over_at || wo.repair_declined || wo.cancellation) return null;
+    const until = new Date(new Date(wo.handed_over_at).getTime() + WARRANTY_DAYS * DAY_MS);
+    const leftMs = until.getTime() - Date.now();
+    return {
+        days: WARRANTY_DAYS,
+        starts_at: wo.handed_over_at,
+        until: until.toISOString(),
+        active: leftMs > 0,
+        days_left: leftMs > 0 ? Math.ceil(leftMs / DAY_MS) : 0
+    };
+}
+
 function presentWo(wo, { detail = false } = {}) {
     const db = getDb();
     const out = {
         ...wo,
         repair_declined: Boolean(wo.repair_declined),
         pickup: pickupOf(wo),
+        warranty: warrantyOf(wo),
+        parent_work_order_id: wo.parent_work_order_id || null,
         technician_name: userName(wo.technician_id),
         payment: paymentSummary(wo.work_order_id),
         has_pending_quotation: db.quotations.some((q) => q.work_order_id === wo.work_order_id && ["DRAFT", "SENT"].includes(q.status))
@@ -644,6 +675,12 @@ function presentWo(wo, { detail = false } = {}) {
             .filter((m) => m.work_order_id === wo.work_order_id)
             .map((m) => ({ ...m, part_name: db.parts.find((p) => p.part_id === m.part_id)?.name }));
         out.booking_number = wo.booking_id ? db.bookings.find((b) => b.booking_id === wo.booking_id)?.booking_number : null;
+        // Task 12: claim <-> original repair.
+        const parent = wo.parent_work_order_id && db.workOrders.find((w) => w.work_order_id === wo.parent_work_order_id);
+        out.warranty_parent = parent ? { work_order_id: parent.work_order_id, work_order_number: parent.work_order_number, handed_over_at: parent.handed_over_at } : null;
+        out.warranty_claims = db.workOrders
+            .filter((w) => w.parent_work_order_id === wo.work_order_id)
+            .map((w) => ({ work_order_id: w.work_order_id, work_order_number: w.work_order_number, status: w.status, created_at: w.created_at }));
     }
     return out;
 }
@@ -736,6 +773,35 @@ export const repairs = {
         return respond(presentWo(wo), 350);
     }),
 
+    /** Task 12: the same fault came back under warranty; the claim is free. */
+    openWarrantyClaim: handler(async (woId, { reported_symptom, accessories, intake_terms_acknowledged } = {}) => {
+        const user = requireRole("ADMIN");
+        const parent = loadWo(woId, user);
+        if (!reported_symptom?.trim()) throw bad("เล่าอาการที่กลับมา", "Describe the problem");
+        if (!intake_terms_acknowledged) throw bad("ลูกค้าต้องรับทราบเงื่อนไขการรับเครื่อง", "Customer intake terms acknowledgement is required");
+        if (!warrantyOf(parent)?.active) throw bad("ใบงานนี้ไม่อยู่ในประกันแล้ว", "This work order is not under warranty", 409);
+        const open = getDb().workOrders.find((w) => w.parent_work_order_id === parent.work_order_id && !w.handed_over_at && !w.cancellation);
+        if (open) throw bad(`มีใบงานเคลมที่ยังเปิดอยู่แล้ว: ${open.work_order_number}`, `A warranty claim is already open: ${open.work_order_number}`, 409);
+        const claim = createWorkOrder({
+            source: parent.source,
+            booking_id: null,
+            parent_work_order_id: parent.work_order_id,
+            customer_id: parent.customer_id,
+            customer_name: parent.customer_name,
+            customer_phone: parent.customer_phone,
+            service_id: parent.service_id,
+            service_name: parent.service_name,
+            device_type: parent.device_type,
+            brand: parent.brand,
+            model: parent.model,
+            serial_number: parent.serial_number,
+            reported_symptom: reported_symptom.trim(),
+            accessories: accessories?.trim() || null,
+            intake_terms_acknowledged_at: now()
+        }, user, `เคลมประกันจาก ${parent.work_order_number}`);
+        return respond(presentWo(claim, { detail: true }));
+    }),
+
     /** Received devices nobody has taken yet, oldest first (mirrors GET /work-orders/queue). */
     queue: handler(async () => {
         requireRole("TECHNICIAN", "ADMIN");
@@ -813,8 +879,16 @@ export const repairs = {
             if (total <= 0) throw bad("ทุกตัวเลือกต้องมีราคามากกว่า 0", "Every option needs a total above 0");
             return { option_id: newId(), kind: "REPAIR", title: o.title.trim(), description: o.description?.trim() || null, items, total };
         });
+        const claim = Boolean(wo.parent_work_order_id);
+        if (claim) {
+            for (const o of priced) {
+                o.items = o.items.map((i) => ({ ...i, unit_price: 0 }));
+                o.total = 0;
+            }
+        }
+        const fee = claim ? 0 : NO_REPAIR_FEE;
         const system = kind === "INITIAL"
-            ? { option_id: newId(), kind: "NO_REPAIR", title: "ไม่ซ่อม รับเครื่องคืน", description: `ตรวจเช็กฟรีเมื่อซ่อม หากไม่ซ่อมคิดค่าตรวจเช็ก ${NO_REPAIR_FEE} บาท`, items: [{ item_id: newId(), type: "LABOR", description: "ค่าตรวจเช็ก (ไม่ซ่อม)", part_id: null, qty: 1, unit_price: NO_REPAIR_FEE }], total: NO_REPAIR_FEE }
+            ? { option_id: newId(), kind: "NO_REPAIR", title: "ไม่ซ่อม รับเครื่องคืน", description: claim ? "งานเคลมประกัน ไม่มีค่าใช้จ่าย" : `ตรวจเช็กฟรีเมื่อซ่อม หากไม่ซ่อมคิดค่าตรวจเช็ก ${fee} บาท`, items: [{ item_id: newId(), type: "LABOR", description: "ค่าตรวจเช็ก (ไม่ซ่อม)", part_id: null, qty: 1, unit_price: fee }], total: fee }
             : { option_id: newId(), kind: "SKIP_EXTRA", title: "ไม่ทำงานเพิ่ม", description: "ซ่อมต่อตามที่อนุมัติไว้เดิม ไม่มีค่าใช้จ่ายเพิ่ม", items: [], total: 0 };
         const q = {
             quotation_id: newId(),

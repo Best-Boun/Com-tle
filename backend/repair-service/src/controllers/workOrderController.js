@@ -32,6 +32,11 @@ function createWorkOrderController(workOrderService) {
             res.status(200).json(successResponse("Assigned work orders retrieved", workOrders));
         }),
 
+        createWarrantyClaim: handle(async (req, res) => {
+            const workOrder = await workOrderService.createWarrantyClaim(req.params.workOrderId, req.body, req.user);
+            res.status(201).json(successResponse("Warranty claim opened", workOrder));
+        }),
+
         listQueue: handle(async (req, res) => {
             const workOrders = await workOrderService.listQueue(req.user);
             res.status(200).json(successResponse("Technician queue retrieved", workOrders));

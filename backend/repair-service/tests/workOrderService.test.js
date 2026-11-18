@@ -67,6 +67,27 @@ function createHarness() {
             workOrder.technician_id = technicianId;
             return { workOrder };
         },
+        async createWarrantyClaim(parentId, isEligible, buildClaim) {
+            const parent = workOrders.find((item) => item.work_order_id === parentId);
+            if (!parent) return { notFound: true };
+            if (!isEligible(parent)) return { notEligible: true };
+            const open = workOrders.find((item) => item.parent_work_order_id === parentId
+                && !["HANDED_OVER", "ABANDONED"].includes(item.status));
+            if (open) return { openClaim: open.work_order_number };
+            const { workOrder, initialHistory } = buildClaim(parent);
+            const claim = {
+                ...parent,
+                ...workOrder,
+                parent_work_order_id: parentId,
+                status: "RECEIVED",
+                close_reason: null,
+                handed_over_at: null,
+                technician_id: null
+            };
+            workOrders.push(claim);
+            history.push(initialHistory);
+            return { workOrder: claim };
+        },
         async listUnassigned() {
             return workOrders.filter((item) => !item.technician_id && item.status === "RECEIVED");
         },
@@ -293,4 +314,66 @@ test("handover returns not found without querying payment for a missing work ord
         { statusCode: 404 }
     );
     assert.equal(paymentBalanceRequested, false);
+});
+test("a repaired device has a 90-day warranty from handover; declined jobs have none", async () => {
+    const { service, workOrders } = createHarness();
+    const admin = { userId: ADMIN_ID, roles: ["ADMIN"] };
+    const created = await service.createFromBooking(booking, admin);
+
+    assert.equal((await service.get(created.work_order_id, admin)).warranty, null);
+
+    Object.assign(workOrders[0], {
+        status: "HANDED_OVER",
+        close_reason: "REPAIRED",
+        handed_over_at: new Date("2026-11-01T03:00:00.000Z")
+    });
+    const repaired = await service.get(created.work_order_id, admin);
+    assert.equal(repaired.warranty.days, 90);
+    assert.equal(repaired.warranty.until, "2027-01-30T03:00:00.000Z");
+    assert.equal(repaired.warranty.active, true);
+    // The harness clock is 2026-11-15, 14 days after handover.
+    assert.equal(repaired.warranty.days_left, 76);
+
+    workOrders[0].close_reason = "REJECTED";
+    assert.equal((await service.get(created.work_order_id, admin)).warranty, null);
+});
+
+test("the shop opens one warranty claim at a time, only while the warranty runs", async () => {
+    const { service, workOrders } = createHarness();
+    const admin = { userId: ADMIN_ID, roles: ["ADMIN"] };
+    const created = await service.createFromBooking(booking, admin);
+    const claimInput = { reported_symptom: "เปิดไม่ติดอีกแล้ว", accessories: "สายชาร์จ", intake_terms_acknowledged: true };
+
+    // Not handed over yet: no warranty, no claim.
+    await assert.rejects(service.createWarrantyClaim(created.work_order_id, claimInput, admin), { statusCode: 409 });
+
+    Object.assign(workOrders[0], {
+        status: "HANDED_OVER",
+        close_reason: "REPAIRED",
+        handed_over_at: new Date("2026-11-01T03:00:00.000Z")
+    });
+    await assert.rejects(
+        service.createWarrantyClaim(created.work_order_id, claimInput, { userId: CUSTOMER_ID, roles: ["CUSTOMER"] }),
+        { statusCode: 403 }
+    );
+    await assert.rejects(
+        service.createWarrantyClaim(created.work_order_id, { ...claimInput, intake_terms_acknowledged: false }, admin),
+        { statusCode: 400 }
+    );
+
+    const claim = await service.createWarrantyClaim(created.work_order_id, claimInput, admin);
+    assert.equal(claim.parent_work_order_id, created.work_order_id);
+    assert.equal(claim.status, "PENDING");
+    assert.equal(claim.customer_id, CUSTOMER_ID);
+    assert.equal(claim.reported_symptom, "เปิดไม่ติดอีกแล้ว");
+    assert.notEqual(claim.work_order_id, created.work_order_id);
+
+    // A second claim waits until the first is closed.
+    await assert.rejects(service.createWarrantyClaim(created.work_order_id, claimInput, admin), { statusCode: 409 });
+    await assert.rejects(service.createWarrantyClaim("8d4a9eb2-e361-4e27-aab1-64255e7d02b1", claimInput, admin), { statusCode: 404 });
+
+    // After 90 days the warranty is over.
+    workOrders.find((w) => w.work_order_id === claim.work_order_id).status = "HANDED_OVER";
+    workOrders[0].handed_over_at = new Date("2026-08-01T03:00:00.000Z");
+    await assert.rejects(service.createWarrantyClaim(created.work_order_id, claimInput, admin), { statusCode: 409 });
 });

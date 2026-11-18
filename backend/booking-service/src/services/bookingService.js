@@ -147,6 +147,21 @@ function createBookingService({
     }
 
     return {
+        /**
+         * Task 2: requests nobody brought in within `requestExpiryDays` are closed
+         * (EXPIRED), so the counter list only shows devices that may still come.
+         * Run by a timer in server.js; returns how many were closed.
+         */
+        async expireStaleRequests() {
+            const at = now();
+            const cutoff = new Date(at.getTime() - config.requestExpiryDays * 24 * 60 * 60 * 1000);
+            return repo.expireOpenBefore(cutoff, {
+                reason: `No device brought in within ${config.requestExpiryDays} days`,
+                createId,
+                at
+            });
+        },
+
         /** The choices the request form offers. */
         getOptions() {
             return { device_types: [...DEVICE_TYPES], symptom_groups: [...SYMPTOM_GROUPS] };

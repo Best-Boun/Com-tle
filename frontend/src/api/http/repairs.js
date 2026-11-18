@@ -13,6 +13,18 @@ export const repairs = {
         return request(`${ROOT}/assigned`);
     },
 
+    /** Task 12: open a free warranty-claim work order for a repaired device. */
+    async openWarrantyClaim(workOrderId, { reported_symptom, accessories, intake_terms_acknowledged } = {}) {
+        return request(`${ROOT}/${encodeURIComponent(workOrderId)}/warranty-claims`, {
+            method: "POST",
+            body: {
+                reported_symptom: reported_symptom?.trim() || "",
+                accessories: accessories?.trim() || null,
+                intake_terms_acknowledged: intake_terms_acknowledged === true
+            }
+        });
+    },
+
     /** Received devices nobody has taken yet (oldest first). */
     async queue() {
         return request(`${ROOT}/queue`);

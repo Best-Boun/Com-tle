@@ -353,6 +353,7 @@ test("proxies only the approved Repair-Service workflow routes", async () => {
             ["/api/repairs/work-orders/assigned", {}],
             ["/api/repairs/work-orders/queue", {}],
             [`/api/repairs/work-orders/${workOrderId}/claim`, postOptions()],
+            [`/api/repairs/work-orders/${workOrderId}/warranty-claims`, postOptions()],
             ["/api/repairs/work-orders", {}],
             ["/api/repairs/work-orders", postOptions()],
             ["/api/repairs/work-orders/walk-in", postOptions()],

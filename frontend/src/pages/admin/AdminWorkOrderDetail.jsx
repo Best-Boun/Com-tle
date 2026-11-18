@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useI18n } from "../../i18n/I18nProvider.jsx";
 import { api } from "../../api/index.js";
 import { useAsync } from "../../utils/useAsync.js";
 import { ErrorNotice, Loading, Modal, Money, Stamp, TextField, useAction } from "../../components/ui.jsx";
+import { WarrantyNotice } from "../../components/Warranty.jsx";
 import { OptionPicker, PaymentSummary, PickupNote, QuotationCard, RepairProgress, WoHistory, deviceLabel } from "../../components/repair.jsx";
 import RefundRequests, { OPEN_REFUND } from "../../components/RefundRequests.jsx";
 import "./admin.css";
@@ -19,7 +20,8 @@ export default function AdminWorkOrderDetail() {
     const parts = useAsync(() => api.inventory.listParts(), []);
     const refunds = useAsync(() => api.payments.listRefunds({ work_order_id: workOrderId }), [workOrderId]);
     const [run, busy] = useAction();
-    const [modal, setModal] = useState(null); // "pay" | "refund" | "handover" | "cancel"
+    const navigate = useNavigate();
+    const [modal, setModal] = useState(null); // "pay" | "refund" | "handover" | "cancel" | "claim"
     const [form, setForm] = useState({});
 
     async function act(fn, message) {
@@ -170,6 +172,15 @@ export default function AdminWorkOrderDetail() {
                             {w.handover_exception && ` · ${L("ข้อยกเว้น", "Exception")}: ${w.handover_exception.reason} (${L("ค้าง", "due")} ${fmt.money(w.handover_exception.outstanding)}, ${L("อนุมัติโดย", "approved by")} ${w.handover_exception.approved_by_name})`}
                         </div>
                     )}
+                    <WarrantyNotice w={w} base="/admin/work-orders">
+                        {w.warranty?.active && (
+                            <div style={{ marginTop: 8 }}>
+                                <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setForm({ symptom: "", accessories: "", termsAcknowledged: false }); setModal("claim"); }}>
+                                    {L("เปิดใบงานเคลมประกัน", "Open a warranty claim")}
+                                </button>
+                            </div>
+                        )}
+                    </WarrantyNotice>
                     {w.status === "CANCELLED" && w.cancellation && (
                         <div className="notice error">
                             {L("ยกเลิกโดย", "Cancelled by")} {w.cancellation.by_name} · {w.cancellation.reason}
@@ -324,6 +335,35 @@ export default function AdminWorkOrderDetail() {
                             <input type="checkbox" checked={form.termsAcknowledged === true} onChange={(e) => setForm({ ...form, termsAcknowledged: e.target.checked })} />
                             <span>{L("ลูกค้ารับทราบเงื่อนไขการรับเครื่อง และตรวจสอบความเรียบร้อยก่อนนำเครื่องออกจากร้าน", "The customer acknowledges the handover terms and confirms the device was checked before leaving.")}</span>
                         </label>
+                    </div>
+                </Modal>
+            )}
+
+            {modal === "claim" && (
+                <Modal title={L(`เคลมประกัน ${w.work_order_number}`, `Warranty claim for ${w.work_order_number}`)} onClose={() => setModal(null)} footer={(
+                    <>
+                        <button type="button" className="btn btn-secondary" onClick={() => setModal(null)}>{t("common.cancel")}</button>
+                        <button
+                            type="button"
+                            className="btn btn-primary"
+                            disabled={busy || !form.symptom?.trim() || !form.termsAcknowledged}
+                            onClick={async () => {
+                                const claim = await run(
+                                    () => api.repairs.openWarrantyClaim(w.work_order_id, { reported_symptom: form.symptom, accessories: form.accessories, intake_terms_acknowledged: form.termsAcknowledged }),
+                                    L("เปิดใบงานเคลมแล้ว", "Warranty claim opened")
+                                ).catch(() => null);
+                                if (claim) { setModal(null); navigate(`/admin/work-orders/${claim.work_order_id}`); }
+                            }}
+                        >
+                            {L("รับเครื่องและเปิดใบงานเคลม", "Check in & open claim")}
+                        </button>
+                    </>
+                )}>
+                    <div className="stack">
+                        <p className="small muted">{L("ใช้เมื่ออาการเดิมกลับมาภายในระยะประกัน ใบงานใหม่ผูกกับใบนี้ ทุกตัวเลือกในใบเสนอราคาเป็น ฿0 รวมถึง “ไม่ซ่อม” ลูกค้าไม่ต้องจ่าย", "For the same fault coming back under warranty. The new work order is linked to this one; every quoted option is ฿0, including “no repair”.")}</p>
+                        <TextField as="textarea" label={L("อาการที่กลับมา", "What came back")} value={form.symptom} onChange={(e) => setForm({ ...form, symptom: e.target.value })} />
+                        <TextField label={L("อุปกรณ์ที่ลูกค้าฝากไว้", "Accessories left with the device")} value={form.accessories} onChange={(e) => setForm({ ...form, accessories: e.target.value })} />
+                        <label className="checkbox"><input type="checkbox" checked={form.termsAcknowledged} onChange={(e) => setForm({ ...form, termsAcknowledged: e.target.checked })} />{L("ลูกค้ารับทราบเงื่อนไขการรับเครื่อง", "The customer acknowledges the intake terms")}</label>
                     </div>
                 </Modal>
             )}

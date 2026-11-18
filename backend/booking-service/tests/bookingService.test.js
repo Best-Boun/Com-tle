@@ -287,3 +287,41 @@ test("the form options list the device types and symptom groups", () => {
     assert.ok(options.symptom_groups.includes("WONT_POWER_ON"));
     assert.ok(options.symptom_groups.includes("OTHER"));
 });
+
+test("requests nobody brought in within 30 days expire; newer and closed ones stay", async () => {
+    let clock = FIXED_NOW;
+    const { service, repo } = setup({ now: FIXED_NOW });
+
+    const timed = createBookingService({
+        bookingRepository: repo,
+        catalogClient: createFakeClients().catalogClient,
+        repairClient: createFakeClients().repairClient,
+        config: TEST_CONFIG,
+        now: () => clock
+    });
+
+    const old = await service.createBooking(requestInput(), CUSTOMER, CTX);
+    const done = await service.createBooking(requestInput(), CUSTOMER, CTX);
+    await service.checkIn(done.booking_id, ADMIN, CTX);
+    // A request made 29 days later than the first one.
+    repo.bookings.set("ffffffff-0000-4000-8000-000000000001", {
+        ...repo.bookings.get(old.booking_id),
+        booking_id: "ffffffff-0000-4000-8000-000000000001",
+        booking_number: "RQ-NEWER",
+        created_at: new Date(FIXED_NOW.getTime() + 29 * 86400000)
+    });
+
+
+    clock = new Date(FIXED_NOW.getTime() + 30 * 86400000 + 1000);
+    assert.equal(await timed.expireStaleRequests(), 1);
+    assert.equal(repo.bookings.get(old.booking_id).status, "EXPIRED");
+    assert.equal(repo.bookings.get(done.booking_id).status, "COMPLETED");
+    assert.equal(repo.bookings.get("ffffffff-0000-4000-8000-000000000001").status, "PENDING");
+    const entry = repo.history.find((h) => h.booking_id === old.booking_id && h.new_status === "EXPIRED");
+    assert.equal(entry.changed_by, null);
+    assert.match(entry.reason, /30 days/);
+
+    // Running again changes nothing; an expired request cannot be checked in.
+    assert.equal(await timed.expireStaleRequests(), 0);
+    await assert.rejects(timed.checkIn(old.booking_id, ADMIN, CTX), { statusCode: 409 });
+});
