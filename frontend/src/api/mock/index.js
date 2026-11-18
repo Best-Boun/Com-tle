@@ -542,6 +542,7 @@ export const bookings = {
             intake_terms_acknowledged_at: now()
         }, user, "รับเครื่องจากคำขอ " + b.booking_number);
         changeBooking(b, "COMPLETED", user, { changes: { work_order_id: wo.work_order_id } });
+        notifyCustomer(wo, "RECEIVED");
         return respond({ booking: presentBooking(b), work_order: wo }, 400);
     })
 };
@@ -799,6 +800,7 @@ export const repairs = {
             accessories: accessories?.trim() || null,
             intake_terms_acknowledged_at: now()
         }, user, `เคลมประกันจาก ${parent.work_order_number}`);
+        notifyCustomer(claim, "CLAIM_OPENED");
         return respond(presentWo(claim, { detail: true }));
     }),
 
@@ -909,6 +911,7 @@ export const repairs = {
         };
         db.quotations.push(q);
         if (kind === "INITIAL") setWoStatus(wo, "WAITING_APPROVAL", user, `ส่งตัวเลือก ${q.options.length} แบบ Rev.${q.revision}`);
+        notifyCustomer(wo, "QUOTATION_SENT");
         return respond(presentWo(wo, { detail: true }));
     }),
 
@@ -951,6 +954,7 @@ export const repairs = {
         if (!["APPROVED", "REPAIRING"].includes(wo.status)) throw bad("ตั้งรออะไหล่ได้หลังอนุมัติหรือระหว่างซ่อม", "Only approved or in-repair jobs can wait for parts", 409);
         if (!note?.trim()) throw bad("ระบุว่ารออะไหล่อะไร", "Say which part is on order");
         setWoStatus(wo, "WAITING_PARTS", user, note.trim());
+        notifyCustomer(wo, "WAITING_PARTS");
         return respond(presentWo(wo, { detail: true }));
     }),
 
@@ -980,6 +984,7 @@ export const repairs = {
         wo.test_result = { passed: Boolean(passed), notes: notes.trim(), tested_by: user.user_id, tested_at: now() };
         if (passed) wo.ready_at = now();
         setWoStatus(wo, passed ? "COMPLETED" : "REPAIRING", user, passed ? "ทดสอบผ่าน" : "ทดสอบไม่ผ่าน กลับไปซ่อม");
+        if (passed) notifyCustomer(wo, "READY_FOR_PICKUP");
         return respond(presentWo(wo, { detail: true }));
     }),
 
@@ -999,6 +1004,7 @@ export const repairs = {
         wo.handover_terms_acknowledged_at = now();
         wo.updated_at = now();
         getDb().workOrderHistory.push({ id: newId(), work_order_id: wo.work_order_id, old_status: wo.status, new_status: wo.status, changed_by: user.user_id, note: pay.balance > 0 ? `ส่งมอบเครื่อง (ข้อยกเว้น ค้าง ${pay.balance} บาท)` : "ส่งมอบเครื่องแล้ว", created_at: now() });
+        notifyCustomer(wo, "HANDED_OVER");
         return respond(presentWo(wo, { detail: true }));
     }),
 
@@ -1022,7 +1028,59 @@ export const repairs = {
         }
         wo.cancellation = { by: user.user_id, by_name: user.full_name, reason: reason.trim(), returned_parts: returned, at: now() };
         setWoStatus(wo, "CANCELLED", user, reason.trim());
+        notifyCustomer(wo, "CANCELLED");
         return respond(presentWo(wo, { detail: true }));
+    })
+};
+
+// ---------------------------------------------------------------- notifications (task 13)
+// Same messages as Repair-Service. The demo has no email; the website shows them.
+const NOTIFY = {
+    RECEIVED: (wo) => [`ร้านรับเครื่องแล้ว ${wo.work_order_number}`, "ร้านรับเครื่องของคุณแล้ว ช่างจะตรวจเช็กและส่งผลตรวจพร้อมตัวเลือกราคามาให้เลือกในเว็บ"],
+    QUOTATION_SENT: (wo) => [`ผลตรวจพร้อมแล้ว เลือกตัวเลือก ${wo.work_order_number}`, "ช่างตรวจเครื่องเสร็จแล้ว เข้าไปอ่านผลตรวจและเลือกตัวเลือกที่ต้องการในหน้าติดตามงานซ่อม ร้านจะเริ่มซ่อมเมื่อคุณเลือก"],
+    WAITING_PARTS: (wo) => [`กำลังรออะไหล่ ${wo.work_order_number}`, "ร้านสั่งอะไหล่สำหรับเครื่องของคุณแล้ว จะเริ่มซ่อมทันทีที่อะไหล่มาถึง"],
+    READY_FOR_PICKUP: (wo) => [`เครื่องพร้อมรับแล้ว ${wo.work_order_number}`, `มารับเครื่องได้ที่ร้าน เก็บเครื่องให้ฟรี ${FREE_STORAGE_DAYS} วัน`],
+    HANDED_OVER: (wo) => [`รับเครื่องคืนแล้ว ${wo.work_order_number}`, wo.repair_declined ? "ขอบคุณที่ใช้บริการ" : "ขอบคุณที่ใช้บริการ งานซ่อมนี้รับประกัน 90 วัน หากอาการเดิมกลับมา ติดต่อร้านได้โดยไม่เสียค่าใช้จ่าย"],
+    CLAIM_OPENED: (wo) => [`เปิดใบงานเคลมแล้ว ${wo.work_order_number}`, "ร้านรับเครื่องเคลมประกันแล้ว งานเคลมไม่มีค่าใช้จ่าย"],
+    CANCELLED: (wo) => [`ยกเลิกงานซ่อม ${wo.work_order_number}`, "งานซ่อมนี้ถูกยกเลิก ติดต่อร้านเพื่อรับเครื่องคืนหรือสอบถามรายละเอียด"]
+};
+
+function notifyCustomer(wo, type) {
+    // Walk-in customers have no account; the shop calls them.
+    if (!wo.customer_id || wo.source === "WALK_IN" || !NOTIFY[type]) return;
+    const [title, message] = NOTIFY[type](wo);
+    getDb().notifications.push({
+        notification_id: newId(),
+        customer_id: wo.customer_id,
+        work_order_id: wo.work_order_id,
+        type,
+        title,
+        message,
+        email_status: "NOT_CONFIGURED",
+        read_at: null,
+        created_at: now()
+    });
+}
+
+export const notifications = {
+    listMine: handler(async () => {
+        const user = requireRole("CUSTOMER");
+        const mine = getDb().notifications
+            .filter((n) => n.customer_id === user.user_id)
+            .sort((a, b) => b.created_at.localeCompare(a.created_at));
+        return respond({ items: mine.slice(0, 50), unread: mine.filter((n) => !n.read_at).length }, 120);
+    }),
+
+    markRead: handler(async (ids = []) => {
+        const user = requireRole("CUSTOMER");
+        let updated = 0;
+        for (const n of getDb().notifications) {
+            if (n.customer_id === user.user_id && !n.read_at && (ids.length === 0 || ids.includes(n.notification_id))) {
+                n.read_at = now();
+                updated += 1;
+            }
+        }
+        return respond({ updated }, 80);
     })
 };
 

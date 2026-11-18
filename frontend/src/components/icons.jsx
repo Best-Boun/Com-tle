@@ -37,7 +37,8 @@ export const Icon = {
     Pin: () => (<svg {...base}><path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12z" /><circle cx="12" cy="9" r="2.5" /></svg>),
     Phone: () => (<svg {...base}><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z" /></svg>),
     Search: () => (<svg {...base}><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></svg>),
-    Arrow: () => (<svg {...base}><path d="M5 12h14M13 6l6 6-6 6" /></svg>)
+    Arrow: () => (<svg {...base}><path d="M5 12h14M13 6l6 6-6 6" /></svg>),
+    Bell: () => (<svg {...base}><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z" /><path d="M10 20a2 2 0 0 0 4 0" /></svg>)
 };
 
 /** Category code -> icon. Unknown codes fall back to a wrench. */

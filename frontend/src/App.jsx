@@ -15,6 +15,7 @@ import MyRepairs from "./pages/customer/MyRepairs.jsx";
 import RepairDetail from "./pages/customer/RepairDetail.jsx";
 import MyPayments from "./pages/customer/MyPayments.jsx";
 import Profile from "./pages/customer/Profile.jsx";
+import MyNotifications from "./pages/customer/MyNotifications.jsx";
 
 import TechJobs from "./pages/technician/TechJobs.jsx";
 import TechJobDetail from "./pages/technician/TechJobDetail.jsx";
@@ -49,6 +50,7 @@ export default function App() {
                 <Route path="my/repairs/:workOrderId" element={customer(<RepairDetail />)} />
                 <Route path="my/payments" element={customer(<MyPayments />)} />
                 <Route path="my/profile" element={customer(<Profile />)} />
+                <Route path="my/notifications" element={customer(<MyNotifications />)} />
                 <Route path="*" element={<NotFound />} />
             </Route>
 

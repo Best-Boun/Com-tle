@@ -2,8 +2,9 @@ import { Link } from "react-router-dom";
 import { useI18n } from "../../i18n/I18nProvider.jsx";
 import { api } from "../../api/index.js";
 import { useAsync } from "../../utils/useAsync.js";
-import { ErrorNotice, Loading, Money, PageHead, StatusBadge } from "../../components/ui.jsx";
+import { ErrorNotice, Loading, Money, PageHead } from "../../components/ui.jsx";
 import { Icon } from "../../components/icons.jsx";
+import { deviceLine, symptomLabel } from "../../utils/requestLabels.js";
 import "./admin.css";
 
 export default function Dashboard() {
@@ -15,7 +16,7 @@ export default function Dashboard() {
     const d = data.data;
 
     const todo = [
-        { count: d.bookings_overdue, to: "/admin/bookings?status=CONFIRMED", th: "เลยเวลานัด ยังไม่รับเครื่อง", en: "Past appointments not checked in" },
+        { count: d.bookings_overdue, to: "/admin/bookings?status=PENDING", th: "คำขอเกิน 7 วัน ยังไม่นำเครื่องมา", en: "Requests waiting over 7 days" },
         { count: d.unassigned, to: "/admin/work-orders?status=OPEN", th: "ใบงานยังไม่มอบหมายช่าง", en: "Jobs without a technician" },
         { count: d.waiting_parts, to: "/admin/work-orders?status=WAITING_PARTS", th: "งานที่รออะไหล่", en: "Jobs waiting for parts" },
         { count: d.ready_for_handover, to: "/admin/work-orders?status=READY", th: "พร้อมรับเครื่อง รอส่งมอบ", en: "Ready for pickup" },
@@ -28,7 +29,7 @@ export default function Dashboard() {
             <PageHead title={L("ภาพรวมวันนี้", "Today")} lede={fmt.dateLong(new Date().toISOString())} />
 
             <div className="kpi-row">
-                <div className="kpi"><span className="kpi-icon"><Icon.Calendar /></span><span className="kpi-label">{L("นัดวันนี้", "Appointments today")}</span><strong className="num">{d.bookings_today}</strong></div>
+                <div className="kpi"><span className="kpi-icon"><Icon.Calendar /></span><span className="kpi-label">{L("คำขอแจ้งซ่อมวันนี้", "Repair requests today")}</span><strong className="num">{d.bookings_today}</strong></div>
                 <div className="kpi"><span className="kpi-icon"><Icon.Wrench /></span><span className="kpi-label">{L("งานที่เปิดอยู่", "Open jobs")}</span><strong className="num">{d.open_work_orders}</strong></div>
                 <div className="kpi"><span className="kpi-icon"><Icon.Clipboard /></span><span className="kpi-label">{L("รอลูกค้าอนุมัติ", "Awaiting customer")}</span><strong className="num">{d.waiting_approval}</strong></div>
                 <div className="kpi kpi-money"><span className="kpi-icon"><Icon.Cash /></span><span className="kpi-label">{L("ยอดค้างชำระรวม", "Outstanding")}</span><strong className="num">{d.outstanding_total === null ? <span title={L("ระบบการเงินไม่พร้อมใช้งาน", "Payment system unavailable")}>—</span> : <Money value={d.outstanding_total} />}</strong>{d.outstanding_total === null && <span className="small faint">{L("ระบบการเงินไม่พร้อม", "Payments unavailable")}</span>}</div>
@@ -88,20 +89,26 @@ export default function Dashboard() {
 
             <section className="stack">
                 <div className="panel-head" style={{ marginBottom: 0 }}>
-                    <h2>{L("นัดที่กำลังจะถึง", "Upcoming appointments")}</h2>
-                    <Link to="/admin/bookings">{L("ดูการจองทั้งหมด", "All bookings")}</Link>
+                    <h2>{L("คำขอที่รอนำเครื่องมา", "Requests waiting for the device")}</h2>
+                    <Link to="/admin/bookings">{L("ดูคำขอทั้งหมด", "All requests")}</Link>
                 </div>
                 <div className="table-wrap">
                     <table className="table">
-                        <thead><tr><th>{L("เวลา", "When")}</th><th>{L("ลูกค้า", "Customer")}</th><th>{L("บริการ", "Service")}</th><th>{L("สถานะ", "Status")}</th></tr></thead>
+                        <thead><tr><th>{L("แจ้งเมื่อ", "Sent")}</th><th>{L("เลขคำขอ", "Request")}</th><th>{L("ลูกค้า", "Customer")}</th><th>{L("เครื่องและอาการ", "Device and fault")}</th></tr></thead>
                         <tbody>
-                            {d.upcoming.length === 0 && <tr><td colSpan={4} className="muted">{L("ไม่มีนัด", "No appointments")}</td></tr>}
+                            {d.upcoming.length === 0 && <tr><td colSpan={4} className="muted">{L("ไม่มีคำขอที่รออยู่", "No requests waiting")}</td></tr>}
                             {d.upcoming.map((b) => (
                                 <tr key={b.booking_id}>
-                                    <td className="num">{fmt.day(b.appointment_date)} · {b.appointment_time}</td>
-                                    <td>{b.customer_name}</td>
-                                    <td>{b.service_name}</td>
-                                    <td><StatusBadge kind="booking" status={b.status} /></td>
+                                    <td className="num">{fmt.dateTime(b.created_at)}</td>
+                                    <td className="num">{b.booking_number}</td>
+                                    <td>
+                                        {b.customer_name}
+                                        {b.contact_phone && <div className="faint small num">{b.contact_phone}</div>}
+                                    </td>
+                                    <td>
+                                        {deviceLine(t, b)}
+                                        {b.symptom_group && <div className="faint small">{symptomLabel(t, b.symptom_group)}</div>}
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>

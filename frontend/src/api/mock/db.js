@@ -316,7 +316,25 @@ function seed() {
         parts,
         stockMovements,
         payments,
-        refunds: []
+        refunds: [],
+        // Task 13: what the customer was told (website; the demo sends no email)
+        notifications: [
+            {
+                notification_id: newId(), customer_id: "u-cust-1", work_order_id: "wo-1", type: "RECEIVED",
+                title: "ร้านรับเครื่องแล้ว WO-0001", message: "ร้านรับเครื่องของคุณแล้ว ช่างจะตรวจเช็กและส่งผลตรวจพร้อมตัวเลือกราคามาให้เลือกในเว็บ",
+                email_status: "NOT_CONFIGURED", read_at: ago(2, 12), created_at: ago(3)
+            },
+            {
+                notification_id: newId(), customer_id: "u-cust-1", work_order_id: "wo-1", type: "QUOTATION_SENT",
+                title: "ผลตรวจพร้อมแล้ว เลือกตัวเลือก WO-0001", message: "ช่างตรวจเครื่องเสร็จแล้ว เข้าไปอ่านผลตรวจและเลือกตัวเลือกที่ต้องการในหน้าติดตามงานซ่อม ร้านจะเริ่มซ่อมเมื่อคุณเลือก",
+                email_status: "NOT_CONFIGURED", read_at: null, created_at: ago(1)
+            },
+            {
+                notification_id: newId(), customer_id: "u-cust-2", work_order_id: "wo-3", type: "READY_FOR_PICKUP",
+                title: "เครื่องพร้อมรับแล้ว WO-0003", message: "มารับเครื่องได้ที่ร้าน เก็บเครื่องให้ฟรี 7 วัน",
+                email_status: "NOT_CONFIGURED", read_at: null, created_at: ago(9)
+            }
+        ]
     };
 }
 
@@ -337,6 +355,7 @@ export function getDb() {
 /** Adds what newer versions expect to demo data saved by an older version. */
 function upgrade(data) {
     if (!Array.isArray(data.refunds)) data.refunds = [];
+    if (!Array.isArray(data.notifications)) data.notifications = seed().notifications;
     if (!data.users.some((u) => u.user_id === "u-admin-2")) {
         const manager = seed().users.find((u) => u.user_id === "u-admin-2");
         if (manager) data.users.push(manager);

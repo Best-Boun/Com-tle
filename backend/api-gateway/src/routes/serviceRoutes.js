@@ -90,7 +90,9 @@ const repairRoutePatterns = [
     ["GET", /^\/parts\/movements$/],
     ["POST", new RegExp(`^\\/parts\\/${UUID}\\/receive$`)],
     ["POST", new RegExp(`^\\/work-orders\\/${UUID}\\/parts\\/(?:issue|wait)$`)],
-    ["GET", new RegExp(`^\\/work-orders\\/${UUID}$`)]
+    ["GET", new RegExp(`^\\/work-orders\\/${UUID}$`)],
+    ["GET", /^\/notifications\/me$/],
+    ["POST", /^\/notifications\/me\/read$/]
 ];
 
 function allowOnly(patterns) {

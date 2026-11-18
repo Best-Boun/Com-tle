@@ -374,7 +374,9 @@ test("proxies only the approved Repair-Service workflow routes", async () => {
             ["/api/repairs/parts/movements", {}],
             [`/api/repairs/parts/${partId}/receive`, postOptions()],
             [`/api/repairs/work-orders/${workOrderId}/parts/issue`, postOptions()],
-            [`/api/repairs/work-orders/${workOrderId}`, {}]
+            [`/api/repairs/work-orders/${workOrderId}`, {}],
+            ["/api/repairs/notifications/me", {}],
+            ["/api/repairs/notifications/me/read", postOptions()]
         ];
 
         for (const [path, options] of approved) {

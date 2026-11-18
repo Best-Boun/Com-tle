@@ -69,4 +69,18 @@ Repair-Service database (`repair_parts_inventory` and
 `repair_stock_movements`) so parts can be used without demo data. Payments stay
 in Payment-Service. The frontend registers or updates a bill from approved
 quotations before recording payment or handover; handover independently
-verifies the balance server-side.
+verifies the balance server-side.
+
+## Customer notifications (task 13)
+
+- `GET /notifications/me` — the signed-in customer's latest 50 notifications and
+  the unread count.
+- `POST /notifications/me/read` `{ ids?: [uuid] }` — mark them read (no ids =
+  all).
+
+Steps that notify: check-in (`RECEIVED`), options sent (`QUOTATION_SENT`),
+`WAITING_PARTS`, test passed (`READY_FOR_PICKUP`), `HANDED_OVER`,
+`CLAIM_OPENED`, `CANCELLED`. Walk-in work orders have no account and are
+skipped. Emails go out over `SMTP_URL` (nodemailer) to the email captured at
+check-in; without `SMTP_URL` the notification is only on the website. A failed
+notification never fails the repair step.
