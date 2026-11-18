@@ -16,6 +16,35 @@ export function LangToggle({ className = "btn btn-ghost btn-sm" }) {
     );
 }
 
+/** Task 13: unread notifications for a signed-in customer, refreshed on every page change. */
+function useUnreadCount(enabled) {
+    const location = useLocation();
+    const [count, setCount] = useState(0);
+    useEffect(() => {
+        if (!enabled) return undefined;
+        let live = true;
+        api.notifications.listMine()
+            .then((data) => { if (live) setCount(data.unread); })
+            .catch(() => {});
+        return () => { live = false; };
+    }, [enabled, location.pathname]);
+    return count;
+}
+
+function NotificationBell() {
+    const { L } = useI18n();
+    const unread = useUnreadCount(true);
+    const label = unread > 0
+        ? L(`การแจ้งเตือน (ยังไม่อ่าน ${unread})`, `Notifications (${unread} unread)`)
+        : L("การแจ้งเตือน", "Notifications");
+    return (
+        <Link to="/my/notifications" className="btn btn-ghost btn-sm bell" aria-label={label} title={label}>
+            <Icon.Bell />
+            {unread > 0 && <span className="bell-count num" aria-hidden="true">{unread > 99 ? "99+" : unread}</span>}
+        </Link>
+    );
+}
+
 function useCloseOnNavigate(setOpen) {
     const location = useLocation();
     useEffect(() => setOpen(false), [location.pathname, setOpen]);
@@ -57,6 +86,7 @@ export function PublicLayout() {
                         <LangToggle />
                         {user ? (
                             <>
+                                {isCustomer && <NotificationBell />}
                                 {isCustomer && <Link to="/my/profile" className="btn btn-ghost btn-sm hide-sm"><Icon.User />{user.full_name.split(" ")[0]}</Link>}
                                 <button type="button" className="btn btn-secondary btn-sm hide-sm" onClick={signOut}>{t("common.signout")}</button>
                             </>

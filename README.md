@@ -241,6 +241,8 @@ Endpoint ภายใน (เรียกได้เฉพาะระหว่
 | POST | `/api/repairs/parts/:partId/receive` | ADMIN | รับอะไหล่เข้าสต็อก |
 | GET | `/api/repairs/parts/movements` | ADMIN | ประวัติการเคลื่อนไหวอะไหล่ |
 | POST | `/api/repairs/work-orders/:workOrderId/parts/issue` | ADMIN | เบิกอะไหล่ใช้กับใบงาน (เฉพาะรายการที่ลูกค้าอนุมัติ, ช่างเป็นคนเสนอ) |
+| GET | `/api/repairs/notifications/me` | CUSTOMER | การแจ้งเตือนของฉัน 50 รายการล่าสุด + จำนวนที่ยังไม่อ่าน |
+| POST | `/api/repairs/notifications/me/read` | CUSTOMER | อ่านแล้ว `{ ids?: [uuid] }` (ไม่ส่ง ids = อ่านทั้งหมด) |
 
 #### ใบเสนอราคาแบบหลายตัวเลือก
 
@@ -275,6 +277,26 @@ POST /api/repairs/work-orders/:workOrderId/quotations
 `PENDING` → `DIAGNOSING` → `WAITING_APPROVAL` → `APPROVED` → (`WAITING_PARTS`) → `REPAIRING` → `TESTING` → `COMPLETED` (รอรับเครื่อง; ส่งมอบแล้วดูจาก `handed_over_at`) / `CANCELLED`
 
 ใบงานที่รอรับเครื่องมี `pickup: { ready_at, free_until, free_days, overdue, days_overdue }` เก็บฟรี `FREE_STORAGE_DAYS` วัน (ค่าเริ่มต้น 7) เกินแล้ว Dashboard ขึ้นรายการให้โทรตาม (ไม่มีค่าฝากเก็บ)
+
+#### การแจ้งเตือนลูกค้า (ข้อ 13)
+
+Repair Service แจ้งลูกค้าที่มีบัญชีทั้งในเว็บ (กระดิ่งมุมขวาบน และหน้า `/my/notifications`) และทางอีเมล ลูกค้า walk-in ไม่มีบัญชี ร้านโทรแจ้งเอง
+
+| `type` | เมื่อไร |
+|---|---|
+| `RECEIVED` | รับเครื่องจากคำขอแจ้งซ่อม (check-in) |
+| `QUOTATION_SENT` | ช่างส่งตัวเลือกพร้อมราคา (รวมงานเพิ่ม) |
+| `WAITING_PARTS` | ตั้งสถานะรออะไหล่ |
+| `READY_FOR_PICKUP` | ทดสอบผ่าน พร้อมรับเครื่อง (บอกจำนวนวันเก็บฟรี) |
+| `HANDED_OVER` | ส่งมอบแล้ว (บอกระยะรับประกัน) |
+| `CLAIM_OPENED` | เปิดใบงานเคลม |
+| `CANCELLED` | ยกเลิกงานซ่อม |
+
+รูปแบบข้อความ: `{ notification_id, type, work_order_id, title, message, email_status, read_at, created_at }`
+
+- อีเมลลูกค้าเก็บไว้ใน `work_orders.customer_email` ตอน check-in (อ่านจาก User Service ด้วย token ของแอดมินที่รับเครื่อง)
+- ส่งอีเมลผ่าน SMTP เมื่อตั้ง `SMTP_URL` ใน `.env` ของ repair-service ถ้าไม่ตั้ง จะแจ้งเฉพาะในเว็บ (`email_status: NOT_CONFIGURED`)
+- การแจ้งเตือนล้มเหลวไม่ทำให้ขั้นตอนซ่อมล้มเหลว (เขียน log อย่างเดียว)
 
 ### Payment Service — `/api/payments`
 
@@ -341,7 +363,7 @@ Content-Type: application/json
 | `user_db` | `users`, `customers`, `roles`, `user_roles`, `permissions`, `role_permissions`, `refresh_token_sessions`, `audit_logs` |
 | `booking_db` | `bookings` (เก็บคำขอแจ้งซ่อม: snapshot บริการ, `symptom_group`, `contact_phone`), `booking_status_history` |
 | `catalog_db` | `service_categories`, `services`, `catalog_audit_logs` |
-| `repair_db` | `work_orders`, `work_order_devices`, `work_order_status_history`, `work_order_assignments`, `quotations`, `quotation_options`, `quotation_option_items`, `repair_parts_inventory`, `repair_stock_movements` |
+| `repair_db` | `work_orders`, `work_order_devices`, `work_order_status_history`, `work_order_assignments`, `quotations`, `quotation_options`, `quotation_option_items`, `customer_notifications`, `repair_parts_inventory`, `repair_stock_movements` |
 | `payment_db` | `payments`, `refunds`, `payment_audit_logs`, `idempotency_records`, `payment_locks`, `inbox_events`, `outbox_events` |
 
 ข้อมูลข้ามบริการเชื่อมด้วย ID และ snapshot (ไม่มี JOIN หรือ Foreign Key ข้ามฐานข้อมูล) ภายในแต่ละบริการใช้ transaction, row lock และ UNIQUE constraint รักษาความถูกต้อง

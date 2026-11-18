@@ -66,6 +66,8 @@ function createWorkOrderService({
     getPaymentBalance,
     payment = null,
     resolveCustomerId = null,
+    resolveCustomerEmail = null,
+    notifications = null,
     rules = loadWorkflowConfig(),
     createId = randomUUID,
     now = () => new Date()
@@ -164,7 +166,14 @@ function createWorkOrderService({
             );
     }
 
-    async function createFromBooking(input, user) {
+    // Tells the customer about a step (website + email). Never fails the step.
+    async function announce(workOrder, type) {
+        if (notifications && workOrder) {
+            await notifications.notify(workOrder, type);
+        }
+    }
+
+    async function createFromBooking(input, user, authorization) {
         const parsed = createBookingWorkOrderSchema.safeParse(input);
         if (!parsed.success) {
             throw new AppError("Invalid work order details", 400);
@@ -200,6 +209,7 @@ function createWorkOrderService({
             status: "RECEIVED",
             technician_id: null,
             intake_terms_acknowledged_at: booking.intake_terms_acknowledged ? createdAt : null,
+            customer_email: await customerEmail(booking.customer_id, authorization),
             received_at: createdAt,
             created_at: createdAt,
             updated_at: createdAt
@@ -228,6 +238,8 @@ function createWorkOrderService({
             return present(duplicate);
         }
 
+        await announce(workOrder, "RECEIVED");
+
         // A technician took this booking in the queue: the job goes straight to
         // them. If that fails the work order still stands; the shop assigns it.
         if (booking.technician_user_id) {
@@ -245,6 +257,19 @@ function createWorkOrderService({
         }
 
         return present(workOrder, [initialHistory]);
+    }
+
+    // The customer's email at check-in, for notification emails later on.
+    // Optional: without it the customer still sees notifications on the website.
+    async function customerEmail(customerId, authorization) {
+        if (typeof resolveCustomerEmail !== "function" || !authorization) {
+            return null;
+        }
+        try {
+            return await resolveCustomerEmail(customerId, authorization) || null;
+        } catch {
+            return null;
+        }
     }
 
     async function listMine(user) {
@@ -420,6 +445,7 @@ function createWorkOrderService({
         if (result.openClaim) {
             throw new AppError(`A warranty claim is already open: ${result.openClaim}`, 409);
         }
+        await announce(result.workOrder, "CLAIM_OPENED");
         return present(result.workOrder);
     }
 
@@ -466,6 +492,17 @@ function createWorkOrderService({
         return present(unwrapResult(result));
     }
 
+    async function runAndAnnounce(type, method, workOrderId, user, ...args) {
+        const workOrder = unwrapResult(
+            await workOrderRepository[method](workOrderId, user.userId, ...args)
+        );
+        const announced = typeof type === "function" ? type(workOrder) : type;
+        if (announced) {
+            await announce(workOrder, announced);
+        }
+        return present(workOrder);
+    }
+
     async function startDiagnosis(workOrderId, user) {
         requirePermission(user, PERMISSIONS.DIAGNOSIS_RECORD);
         return runTechnicianStep("startDiagnosis", workOrderId, user);
@@ -486,7 +523,7 @@ function createWorkOrderService({
                 throw new AppError("Every option needs a total greater than zero", 400);
             }
         }
-        return runTechnicianStep("proposeQuotation", workOrderId, user, data, rules);
+        return runAndAnnounce("QUOTATION_SENT", "proposeQuotation", workOrderId, user, data, rules);
     }
 
     async function decideQuotation(quotationId, input, user) {
@@ -509,7 +546,7 @@ function createWorkOrderService({
     async function waitForParts(workOrderId, input, user) {
         requirePermission(user, PERMISSIONS.REPAIR_START);
         const data = parseInput(waitPartsSchema, input, "Say which part is on order");
-        return runTechnicianStep("markWaitingParts", workOrderId, user, data.note);
+        return runAndAnnounce("WAITING_PARTS", "markWaitingParts", workOrderId, user, data.note);
     }
 
     // Registers (or re-versions) the Payment-Service bill so it matches the
@@ -573,7 +610,8 @@ function createWorkOrderService({
     async function recordTest(workOrderId, input, user) {
         requirePermission(user, PERMISSIONS.TEST_RESULT_RECORD);
         const data = parseInput(testResultSchema, input, "Invalid test result");
-        return runTechnicianStep(
+        return runAndAnnounce(
+            (workOrder) => (workOrder.status === "RETURN_PENDING" ? "READY_FOR_PICKUP" : null),
             "recordTestResult",
             workOrderId,
             user,
@@ -613,23 +651,27 @@ function createWorkOrderService({
                 409
             );
         }
-        return present(unwrapResult(await workOrderRepository.handover(
+        const handedOver = unwrapResult(await workOrderRepository.handover(
             workOrderId,
             user.userId,
             data.exceptionReason?.trim() || null,
             outstanding
-        )));
+        ));
+        await announce(handedOver, "HANDED_OVER");
+        return present(handedOver);
     }
 
     async function cancel(workOrderId, input, user) {
         requirePermission(user, PERMISSIONS.WORK_ORDER_ASSIGN_TECHNICIAN);
         const data = parseInput(cancelSchema, input, "Invalid cancellation details");
-        return present(unwrapResult(await workOrderRepository.cancel(
+        const cancelled = unwrapResult(await workOrderRepository.cancel(
             workOrderId,
             user.userId,
             data.reason,
             data.returnParts !== false
-        )));
+        ));
+        await announce(cancelled, "CANCELLED");
+        return present(cancelled);
     }
 
     async function listParts(user) {

@@ -354,3 +354,52 @@
 #root > .shell {
     flex: 1;
 }
+
+/* ---------- Notification bell (task 13) ---------- */
+.bell {
+    position: relative;
+}
+
+.bell-count {
+    position: absolute;
+    top: 0;
+    right: 0;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--red);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+}
+
+.notice-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--s2);
+}
+
+.notice-item {
+    display: grid;
+    gap: 4px;
+    padding: var(--s3) var(--s4);
+    border: 1px solid var(--line);
+    border-radius: var(--r-panel);
+    background: var(--surface);
+    color: inherit;
+    text-decoration: none;
+}
+
+.notice-item.is-unread {
+    border-color: var(--green);
+    box-shadow: inset 3px 0 0 var(--green);
+}
+
+.notice-item:hover {
+    border-color: var(--green);
+}

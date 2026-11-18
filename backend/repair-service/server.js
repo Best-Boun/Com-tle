@@ -6,6 +6,9 @@ const { createApp } = require("./src/app");
 const { createWorkOrderRepository } = require("./src/repositories/workOrderRepository");
 const { createWorkOrderService } = require("./src/services/workOrderService");
 const { loadWorkflowConfig } = require("./src/config/workflowConfig");
+const { createNotificationRepository } = require("./src/repositories/notificationRepository");
+const { createNotificationService } = require("./src/services/notificationService");
+const { createMailer } = require("./src/services/mailer");
 const {
     loadServiceJwtConfig,
     createAuthenticate
@@ -111,14 +114,38 @@ async function resolveCustomerId(userId, authorization) {
     return data.customer.customer_id;
 }
 
+// The customer's email for notification emails (customer contact first,
+// then the account email). Read with the check-in admin's token.
+async function resolveCustomerEmail(userId, authorization) {
+    const { response, data } = await callService(
+        `${userServiceUrl}/admin/users/${encodeURIComponent(userId)}`,
+        authorization
+    );
+    if (!response.ok) {
+        return null;
+    }
+    return data?.customer?.email || data?.email || null;
+}
+
+const rules = loadWorkflowConfig();
+const notificationService = createNotificationService({
+    notificationRepository: createNotificationRepository(db),
+    mailer: createMailer(process.env),
+    rules,
+    webBaseUrl: process.env.WEB_BASE_URL || null
+});
+
 const app = createApp({
     workOrderService: createWorkOrderService({
         workOrderRepository: createWorkOrderRepository(db),
         getPaymentBalance,
         payment,
         resolveCustomerId,
-        rules: loadWorkflowConfig()
+        resolveCustomerEmail,
+        notifications: notificationService,
+        rules
     }),
+    notificationService,
     authenticate: createAuthenticate({ jwt, ...jwtConfig }),
     healthCheck: () => db.raw("SELECT 1")
 });

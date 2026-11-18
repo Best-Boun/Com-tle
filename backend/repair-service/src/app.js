@@ -1,12 +1,13 @@
 const express = require("express");
 const helmet = require("helmet");
 const createWorkOrderRouter = require("./routes/workOrderRoutes");
+const createNotificationRouter = require("./routes/notificationRoutes");
 const {
     notFoundHandler,
     errorHandler
 } = require("../../shared/middleware/errorMiddleware");
 
-function createApp({ workOrderService, authenticate, healthCheck }) {
+function createApp({ workOrderService, notificationService = null, authenticate, healthCheck }) {
     const app = express();
 
     app.use(helmet());
@@ -32,6 +33,9 @@ function createApp({ workOrderService, authenticate, healthCheck }) {
         }
     });
 
+    if (notificationService) {
+        app.use("/", createNotificationRouter({ notificationService, authenticate }));
+    }
     app.use("/", createWorkOrderRouter({ workOrderService, authenticate }));
     app.use(notFoundHandler);
     app.use(errorHandler);
@@ -41,4 +45,4 @@ function createApp({ workOrderService, authenticate, healthCheck }) {
 
 module.exports = {
     createApp
-};
+};

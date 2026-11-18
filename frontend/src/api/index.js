@@ -13,6 +13,7 @@ import { payments as httpPayments, serviceDown, setWorkOrderLoader } from "./htt
 import { bookings as httpBookings } from "./http/bookings.js";
 import { catalog as httpCatalog } from "./http/catalog.js";
 import { staff as httpStaff } from "./http/staff.js";
+import { notifications as httpNotifications } from "./http/notifications.js";
 import { inventory as httpInventory, repairs as httpRepairs } from "./http/repairs.js";
 
 export const USING_MOCK = import.meta.env.VITE_USE_MOCK !== "false";
@@ -116,5 +117,6 @@ export const api = {
     inventory,
     payments: USING_MOCK ? mock.payments : httpPayments,
     dashboard,
+    notifications: USING_MOCK ? mock.notifications : httpNotifications,
     demo: mock.demo
 };

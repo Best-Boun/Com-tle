@@ -13,7 +13,11 @@ function handle(fn) {
 function createWorkOrderController(workOrderService) {
     return {
         createFromBooking: handle(async (req, res) => {
-            const workOrder = await workOrderService.createFromBooking(req.body, req.user);
+            const workOrder = await workOrderService.createFromBooking(
+                req.body,
+                req.user,
+                req.get("authorization")
+            );
             res.status(201).json(successResponse("Work order created", workOrder));
         }),
 
@@ -201,4 +205,4 @@ function createWorkOrderController(workOrderService) {
 
 module.exports = {
     createWorkOrderController
-};
+};
