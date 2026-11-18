@@ -3,7 +3,8 @@
  * its state across reloads. Field names follow the real backend
  * (booking_db / catalog_db) and the team's business rules.
  */
-const STORAGE_KEY = "smartfix-demo-db-v1";
+// v2: quotations carry priced options (new repair flow)
+const STORAGE_KEY = "smartfix-demo-db-v2";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -169,9 +170,10 @@ function seed() {
             status: "COMPLETED", technician_id: "u-tech-1",
             diagnosis: "ดิสก์เดิม HDD 500GB ทำงานปกติ ย้ายข้อมูลได้",
             repair_result: "ติดตั้ง SSD 1TB และโคลนข้อมูลครบ",
-            test_result: { passed: true, notes: "บูต 9 วินาที ทดสอบอ่านเขียนผ่าน", tested_by: "u-tech-1", tested_at: ago(6) },
+            test_result: { passed: true, notes: "บูต 9 วินาที ทดสอบอ่านเขียนผ่าน", tested_by: "u-tech-1", tested_at: ago(9) },
             handed_over_at: null, handover_exception: null, cancellation: null,
-            created_at: ago(8), updated_at: ago(6)
+            ready_at: ago(9),
+            created_at: ago(11), updated_at: ago(9)
         },
         {
             work_order_id: "wo-4", work_order_number: "WO-0004", source: "WALK_IN", booking_id: null,
@@ -189,34 +191,49 @@ function seed() {
     const workOrderHistory = [
         { id: newId(), work_order_id: "wo-1", old_status: null, new_status: "PENDING", changed_by: "u-admin-1", note: "รับเครื่องจากการจอง", created_at: ago(3) },
         { id: newId(), work_order_id: "wo-1", old_status: "PENDING", new_status: "DIAGNOSING", changed_by: "u-tech-1", note: null, created_at: ago(2, 20) },
-        { id: newId(), work_order_id: "wo-1", old_status: "DIAGNOSING", new_status: "WAITING_APPROVAL", changed_by: "u-admin-1", note: "ส่งใบเสนอราคา Rev.2", created_at: ago(1) },
+        { id: newId(), work_order_id: "wo-1", old_status: "DIAGNOSING", new_status: "WAITING_APPROVAL", changed_by: "u-tech-1", note: "ส่งตัวเลือก 3 แบบ Rev.1", created_at: ago(1) },
         { id: newId(), work_order_id: "wo-2", old_status: null, new_status: "PENDING", changed_by: "u-admin-1", note: "Walk-in", created_at: ago(2) },
         { id: newId(), work_order_id: "wo-2", old_status: "PENDING", new_status: "DIAGNOSING", changed_by: "u-tech-2", note: null, created_at: ago(1, 20) },
         { id: newId(), work_order_id: "wo-2", old_status: "DIAGNOSING", new_status: "WAITING_APPROVAL", changed_by: "u-admin-1", note: null, created_at: ago(1, 10) },
         { id: newId(), work_order_id: "wo-2", old_status: "WAITING_APPROVAL", new_status: "APPROVED", changed_by: "u-admin-1", note: "ลูกค้า walk-in อนุมัติที่หน้าร้าน", created_at: ago(1, 8) },
         { id: newId(), work_order_id: "wo-2", old_status: "APPROVED", new_status: "REPAIRING", changed_by: "u-tech-2", note: null, created_at: ago(0, 5) },
-        { id: newId(), work_order_id: "wo-3", old_status: null, new_status: "PENDING", changed_by: "u-admin-1", note: null, created_at: ago(8) },
-        { id: newId(), work_order_id: "wo-3", old_status: "TESTING", new_status: "COMPLETED", changed_by: "u-tech-1", note: "ทดสอบผ่าน", created_at: ago(6) },
+        { id: newId(), work_order_id: "wo-3", old_status: null, new_status: "PENDING", changed_by: "u-admin-1", note: null, created_at: ago(11) },
+        { id: newId(), work_order_id: "wo-3", old_status: "TESTING", new_status: "COMPLETED", changed_by: "u-tech-1", note: "ทดสอบผ่าน", created_at: ago(9) },
         { id: newId(), work_order_id: "wo-4", old_status: null, new_status: "PENDING", changed_by: "u-admin-1", note: "Walk-in", created_at: ago(0, 3) }
     ];
 
     const quotations = [
         {
-            quotation_id: "q-1", work_order_id: "wo-1", revision: 1, kind: "INITIAL", status: "REJECTED",
-            items: [
-                { item_id: newId(), type: "LABOR", description: "ค่าตรวจเช็กและเปลี่ยน SSD", part_id: null, qty: 1, unit_price: 500 },
-                { item_id: newId(), type: "PART", description: "SSD NVMe 1TB", part_id: "p-ssd1t", qty: 1, unit_price: 2190 }
+            quotation_id: "q-2", work_order_id: "wo-1", revision: 1, kind: "INITIAL", status: "SENT",
+            options: [
+                {
+                    option_id: "opt-2a", kind: "REPAIR", title: "เปลี่ยน SSD 512GB และลง Windows ใหม่",
+                    description: "เครื่องกลับมาเปิดได้และเร็วขึ้น ข้อมูลเดิมกู้ไม่ได้เพราะ SSD เดิมเสีย รับประกัน 90 วัน",
+                    items: [
+                        { item_id: newId(), type: "LABOR", description: "ค่าแรงเปลี่ยน SSD และลง Windows", part_id: null, qty: 1, unit_price: 500 },
+                        { item_id: newId(), type: "PART", description: "SSD NVMe 512GB", part_id: "p-ssd512", qty: 1, unit_price: 1290 }
+                    ],
+                    total: 1790
+                },
+                {
+                    option_id: "opt-2b", kind: "REPAIR", title: "เปลี่ยน SSD 1TB และลง Windows ใหม่",
+                    description: "เหมือนตัวเลือกแรกแต่พื้นที่มากขึ้นเป็นสองเท่า",
+                    items: [
+                        { item_id: newId(), type: "LABOR", description: "ค่าแรงเปลี่ยน SSD และลง Windows", part_id: null, qty: 1, unit_price: 500 },
+                        { item_id: newId(), type: "PART", description: "SSD NVMe 1TB", part_id: "p-ssd1t", qty: 1, unit_price: 2190 }
+                    ],
+                    total: 2690
+                },
+                {
+                    option_id: "opt-2c", kind: "NO_REPAIR", title: "ไม่ซ่อม รับเครื่องคืน",
+                    description: "ตรวจเช็กฟรีเมื่อซ่อม หากไม่ซ่อมคิดค่าตรวจเช็ก 300 บาท",
+                    items: [{ item_id: newId(), type: "LABOR", description: "ค่าตรวจเช็ก (ไม่ซ่อม)", part_id: null, qty: 1, unit_price: 300 }],
+                    total: 300
+                }
             ],
-            note: null, created_by: "u-admin-1", created_at: ago(2), sent_at: ago(2),
-            decided_by: "u-cust-1", decided_at: ago(1, 12), decision_note: "ขอเป็น 512GB ได้ไหม"
-        },
-        {
-            quotation_id: "q-2", work_order_id: "wo-1", revision: 2, kind: "INITIAL", status: "SENT",
-            items: [
-                { item_id: newId(), type: "LABOR", description: "ค่าตรวจเช็กและเปลี่ยน SSD", part_id: null, qty: 1, unit_price: 500 },
-                { item_id: newId(), type: "PART", description: "SSD NVMe 512GB", part_id: "p-ssd512", qty: 1, unit_price: 1290 }
-            ],
-            note: "ปรับเป็น 512GB ตามที่ลูกค้าขอ", created_by: "u-admin-1", created_at: ago(1), sent_at: ago(1),
+            selected_option_id: null,
+            items: [],
+            note: "SSD เสีย ทำให้เปิดเครื่องไม่ขึ้น เลือกได้ 3 แบบ", created_by: "u-tech-1", created_at: ago(1), sent_at: ago(1),
             decided_by: null, decided_at: null, decision_note: null
         },
         {
@@ -229,11 +246,25 @@ function seed() {
             decided_by: "u-admin-1", decided_at: ago(1, 8), decision_note: "Walk-in อนุมัติที่หน้าร้าน"
         },
         {
-            quotation_id: "q-4", work_order_id: "wo-2", revision: 1, kind: "ADDITIONAL", status: "DRAFT",
-            items: [
-                { item_id: newId(), type: "PART", description: "พัดลมโน้ตบุ๊ก (ทั่วไป)", part_id: "p-fan", qty: 1, unit_price: 0 }
+            quotation_id: "q-4", work_order_id: "wo-2", revision: 2, kind: "ADDITIONAL", status: "SENT",
+            options: [
+                {
+                    option_id: "opt-4a", kind: "REPAIR", title: "เปลี่ยนพัดลมใหม่",
+                    description: "พัดลมลูกปืนแตก เสียงดังและระบายความร้อนไม่ทัน เปลี่ยนแล้วเงียบและเย็นลง",
+                    items: [
+                        { item_id: newId(), type: "PART", description: "พัดลมโน้ตบุ๊ก (ทั่วไป)", part_id: "p-fan", qty: 1, unit_price: 350 },
+                        { item_id: newId(), type: "LABOR", description: "ค่าแรงเปลี่ยนพัดลม", part_id: null, qty: 1, unit_price: 100 }
+                    ],
+                    total: 450
+                },
+                {
+                    option_id: "opt-4b", kind: "SKIP_EXTRA", title: "ไม่ทำงานเพิ่ม",
+                    description: "ซ่อมต่อตามที่อนุมัติไว้เดิม ไม่มีค่าใช้จ่ายเพิ่ม", items: [], total: 0
+                }
             ],
-            note: "พบพัดลมลูกปืนแตก ควรเปลี่ยน", created_by: "u-tech-2", created_at: ago(0, 4), sent_at: null,
+            selected_option_id: null,
+            items: [],
+            note: "พบพัดลมลูกปืนแตก ควรเปลี่ยน", created_by: "u-tech-2", created_at: ago(0, 4), sent_at: ago(0, 4),
             decided_by: null, decided_at: null, decision_note: null
         },
         {

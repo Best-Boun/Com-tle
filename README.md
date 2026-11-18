@@ -235,20 +235,54 @@ Endpoint ภายใน (เรียกได้เฉพาะระหว่
 | POST | `/api/repairs/work-orders/:workOrderId/assign` | ADMIN | มอบหมาย/เปลี่ยนช่าง |
 | POST | `/api/repairs/work-orders/:workOrderId/diagnosis/start` | TECHNICIAN | เริ่มวินิจฉัย |
 | PUT | `/api/repairs/work-orders/:workOrderId/diagnosis` | TECHNICIAN | บันทึกผลวินิจฉัย |
-| POST | `/api/repairs/work-orders/:workOrderId/quotations` | ADMIN / TECHNICIAN | สร้างใบเสนอราคา (ช่างเสนอรายการ) |
-| PUT | `/api/repairs/quotations/:quotationId/send` | ADMIN | ตั้งราคาและส่งใบเสนอราคาให้ลูกค้า |
-| POST | `/api/repairs/quotations/:quotationId/revise` | ADMIN | แก้ใบเสนอราคา (สร้างฉบับใหม่) |
-| POST | `/api/repairs/quotations/:quotationId/decision` | CUSTOMER / ADMIN (walk-in) | อนุมัติ/ปฏิเสธใบเสนอราคา |
-| POST | `/api/repairs/work-orders/:workOrderId/repair/start` | TECHNICIAN | เริ่มซ่อม |
+| POST | `/api/repairs/work-orders/:workOrderId/quotations` | TECHNICIAN | ส่งตัวเลือกพร้อมราคา 1-5 แบบให้ลูกค้า (ระบบเพิ่มตัวเลือก "ไม่ซ่อม" ให้เอง) |
+| POST | `/api/repairs/quotations/:quotationId/decision` | CUSTOMER / ADMIN (walk-in) | เลือก 1 ตัวเลือก `{ option_id, note? }` |
+| POST | `/api/repairs/work-orders/:workOrderId/parts/wait` | TECHNICIAN | ตั้งสถานะรออะไหล่ `{ note }` |
+| POST | `/api/repairs/work-orders/:workOrderId/repair/start` | TECHNICIAN | เริ่มซ่อม (จาก "อนุมัติแล้ว" หรือ "รออะไหล่") |
 | PUT | `/api/repairs/work-orders/:workOrderId/repair/result` | TECHNICIAN | บันทึกผลการซ่อม |
 | POST | `/api/repairs/work-orders/:workOrderId/tests` | TECHNICIAN | บันทึกผลทดสอบ (ไม่ผ่าน = กลับไปซ่อม) |
-| POST | `/api/repairs/work-orders/:workOrderId/handover` | ADMIN | ส่งมอบเครื่องคืนลูกค้า (ตรวจยอดค้างกับ Payment) |
+| POST | `/api/repairs/work-orders/:workOrderId/bill` | ADMIN | ให้ Repair คำนวณยอดจากใบเสนอราคาที่อนุมัติแล้วออกบิลกับ Payment |
+| POST | `/api/repairs/work-orders/:workOrderId/handover` | ADMIN | ส่งมอบเครื่องคืนลูกค้า (อัปเดตบิล แล้วตรวจยอดค้างกับ Payment) |
 | POST | `/api/repairs/work-orders/:workOrderId/cancel` | ADMIN | ยกเลิกใบงาน |
 | GET | `/api/repairs/parts` | ADMIN / TECHNICIAN | รายการอะไหล่และจำนวนคงเหลือ |
 | POST | `/api/repairs/parts` | ADMIN | เพิ่มอะไหล่ |
 | POST | `/api/repairs/parts/:partId/receive` | ADMIN | รับอะไหล่เข้าสต็อก |
 | GET | `/api/repairs/parts/movements` | ADMIN | ประวัติการเคลื่อนไหวอะไหล่ |
 | POST | `/api/repairs/work-orders/:workOrderId/parts/issue` | ADMIN | เบิกอะไหล่ใช้กับใบงาน (เฉพาะรายการที่ลูกค้าอนุมัติ, ช่างเป็นคนเสนอ) |
+
+#### ใบเสนอราคาแบบหลายตัวเลือก
+
+ช่างส่ง (ไม่ต้องให้ร้านตั้งราคาก่อน):
+
+```json
+POST /api/repairs/work-orders/:workOrderId/quotations
+{
+  "note": "SSD เสีย ทำให้เปิดเครื่องไม่ขึ้น",
+  "options": [
+    {
+      "title": "เปลี่ยน SSD 512GB",
+      "description": "เปิดได้และเร็วขึ้น รับประกัน 90 วัน",
+      "items": [
+        { "type": "PART", "description": "SSD 512GB", "part_id": "<uuid>", "qty": 1, "unit_price": 1290 },
+        { "type": "LABOR", "description": "ค่าแรง", "qty": 1, "unit_price": 500 }
+      ]
+    }
+  ]
+}
+```
+
+- ใบแรก (`kind: INITIAL`) ระบบเพิ่มตัวเลือก `NO_REPAIR` "ไม่ซ่อม รับเครื่องคืน" ราคา `NO_REPAIR_FEE` (ค่าเริ่มต้น ฿300)
+- งานเพิ่มระหว่างซ่อม (`kind: ADDITIONAL`) ระบบเพิ่มตัวเลือก `SKIP_EXTRA` "ไม่ทำงานเพิ่ม" ราคา ฿0
+- ใบงานที่ได้กลับมา `quotations[].options[]` มี `option_id`, `kind` (`REPAIR` / `NO_REPAIR` / `SKIP_EXTRA`), `title`, `description`, `total`, `items[]` และ `quotations[].selected_option_id`
+- เมื่อลูกค้าเลือก รายการของตัวเลือกนั้นจะกลายเป็น `items` ของใบเสนอราคาที่ `APPROVED` (`total` = ราคาตัวเลือก) Payment จึงคิดยอดจากใบที่ `APPROVED` ได้เหมือนเดิม
+- เลือก `NO_REPAIR` → ใบงานไปที่ "รอรับเครื่อง" ทันที, `repair_declined: true`, ส่งมอบได้โดยไม่ต้องทดสอบ
+- เลือก `SKIP_EXTRA` → ใบเสนอราคางานเพิ่มเป็น `REJECTED` งานเดิมทำต่อ
+
+#### สถานะใบงานที่ API ส่งออก
+
+`PENDING` → `DIAGNOSING` → `WAITING_APPROVAL` → `APPROVED` → (`WAITING_PARTS`) → `REPAIRING` → `TESTING` → `COMPLETED` (รอรับเครื่อง; ส่งมอบแล้วดูจาก `handed_over_at`) / `CANCELLED`
+
+ใบงานที่รอรับเครื่องมี `pickup: { ready_at, free_until, free_days, overdue, days_overdue }` เก็บฟรี `FREE_STORAGE_DAYS` วัน (ค่าเริ่มต้น 7) เกินแล้ว Dashboard ขึ้นรายการให้โทรตาม (ไม่มีค่าฝากเก็บ)
 
 ### Payment Service — `/api/payments`
 
@@ -314,7 +348,7 @@ Content-Type: application/json
 | `user_db` | `users`, `customers`, `roles`, `user_roles`, `permissions`, `role_permissions`, `refresh_token_sessions`, `audit_logs` |
 | `booking_db` | `bookings` (snapshot บริการ, `technician_id`), `booking_status_history` |
 | `catalog_db` | `service_categories`, `services`, `catalog_audit_logs` |
-| `repair_db` | `work_orders`, `work_order_devices`, `work_order_status_history`, `work_order_assignments`, `repair_parts_inventory`, `repair_stock_movements` |
+| `repair_db` | `work_orders`, `work_order_devices`, `work_order_status_history`, `work_order_assignments`, `quotations`, `quotation_options`, `quotation_option_items`, `repair_parts_inventory`, `repair_stock_movements` |
 | `payment_db` | `payments`, `refunds`, `payment_audit_logs`, `idempotency_records`, `payment_locks`, `inbox_events`, `outbox_events` |
 
 ข้อมูลข้ามบริการเชื่อมด้วย ID และ snapshot (ไม่มี JOIN หรือ Foreign Key ข้ามฐานข้อมูล) ภายในแต่ละบริการใช้ transaction, row lock และ UNIQUE constraint รักษาความถูกต้อง

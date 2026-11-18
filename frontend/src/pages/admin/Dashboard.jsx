@@ -17,8 +17,9 @@ export default function Dashboard() {
     const todo = [
         { count: d.bookings_overdue, to: "/admin/bookings?status=CONFIRMED", th: "เลยเวลานัด ยังไม่รับเครื่อง", en: "Past appointments not checked in" },
         { count: d.unassigned, to: "/admin/work-orders?status=OPEN", th: "ใบงานยังไม่มอบหมายช่าง", en: "Jobs without a technician" },
-        { count: d.drafts_to_price, to: "/admin/work-orders?status=OPEN", th: "รายการที่ช่างเสนอ รอตั้งราคา", en: "Proposed items to price" },
-        { count: d.ready_for_handover, to: "/admin/work-orders?status=READY", th: "ซ่อมเสร็จ รอส่งมอบ", en: "Ready for handover" },
+        { count: d.waiting_parts, to: "/admin/work-orders?status=WAITING_PARTS", th: "งานที่รออะไหล่", en: "Jobs waiting for parts" },
+        { count: d.ready_for_handover, to: "/admin/work-orders?status=READY", th: "พร้อมรับเครื่อง รอส่งมอบ", en: "Ready for pickup" },
+        { count: d.overdue_pickups.length, to: "/admin/work-orders?status=READY", th: "เกินเวลาเก็บฟรี ยังไม่มารับเครื่อง", en: "Not collected after free storage" },
         { count: d.low_stock.length, to: "/admin/inventory", th: "อะไหล่ใกล้หมด", en: "Parts running low" }
     ];
 
@@ -61,6 +62,29 @@ export default function Dashboard() {
                     </div>
                 </section>
             </div>
+
+            {d.overdue_pickups.length > 0 && (
+                <section className="stack" id="overdue-pickups">
+                    <h2>{L("โทรตามลูกค้าให้มารับเครื่อง", "Call these customers to collect")}</h2>
+                    <p className="small muted">{L("เกินเวลาเก็บเครื่องฟรีแล้ว ร้านไม่คิดค่าฝากเก็บ แค่โทรเตือน", "Free storage is over. There is no storage fee; just give them a call.")}</p>
+                    <div className="table-wrap">
+                        <table className="table">
+                            <thead><tr><th>{L("ใบงาน", "Ticket")}</th><th>{L("ลูกค้า", "Customer")}</th><th>{L("โทร", "Phone")}</th><th>{L("ครบกำหนดเก็บฟรี", "Free until")}</th><th className="right">{L("เกินมา", "Overdue")}</th></tr></thead>
+                            <tbody>
+                                {d.overdue_pickups.map((w) => (
+                                    <tr key={w.work_order_id}>
+                                        <td><Link to={`/admin/work-orders/${w.work_order_id}`} className="num">{w.work_order_number}</Link></td>
+                                        <td>{w.customer_name || "—"}</td>
+                                        <td className="num">{w.customer_phone ? <a href={`tel:${w.customer_phone}`}>{w.customer_phone}</a> : "—"}</td>
+                                        <td>{fmt.date(w.pickup.free_until)}</td>
+                                        <td className="right num">{L(`${w.pickup.days_overdue} วัน`, `${w.pickup.days_overdue} d`)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            )}
 
             <section className="stack">
                 <div className="panel-head" style={{ marginBottom: 0 }}>

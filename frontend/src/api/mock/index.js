@@ -22,7 +22,11 @@ import {
 import { getSessionUser, setSessionUser } from "../session.js";
 
 const ACTIVE_BOOKING = ["PENDING", "CONFIRMED", "COMPLETED"];
-const OPEN_WO = ["PENDING", "DIAGNOSING", "WAITING_APPROVAL", "APPROVED", "REPAIRING", "TESTING"];
+const OPEN_WO = ["PENDING", "DIAGNOSING", "WAITING_APPROVAL", "APPROVED", "WAITING_PARTS", "REPAIRING", "TESTING"];
+// Shop rules (Repair-Service reads them from NO_REPAIR_FEE / FREE_STORAGE_DAYS).
+const NO_REPAIR_FEE = 300;
+const FREE_STORAGE_DAYS = 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------- helpers
 const now = () => new Date().toISOString();
@@ -649,10 +653,26 @@ function partsAllowance(woId) {
     });
 }
 
+/** Free storage runs from when the device is ready; after that the dashboard flags it. */
+function pickupOf(wo) {
+    if (wo.status !== "COMPLETED" || wo.handed_over_at || !wo.ready_at) return null;
+    const freeUntil = new Date(new Date(wo.ready_at).getTime() + FREE_STORAGE_DAYS * DAY_MS);
+    const overdueMs = Date.now() - freeUntil.getTime();
+    return {
+        ready_at: wo.ready_at,
+        free_until: freeUntil.toISOString(),
+        free_days: FREE_STORAGE_DAYS,
+        overdue: overdueMs > 0,
+        days_overdue: overdueMs > 0 ? Math.max(1, Math.floor(overdueMs / DAY_MS)) : 0
+    };
+}
+
 function presentWo(wo, { detail = false } = {}) {
     const db = getDb();
     const out = {
         ...wo,
+        repair_declined: Boolean(wo.repair_declined),
+        pickup: pickupOf(wo),
         technician_name: userName(wo.technician_id),
         payment: paymentSummary(wo.work_order_id),
         has_pending_quotation: db.quotations.some((q) => q.work_order_id === wo.work_order_id && ["DRAFT", "SENT"].includes(q.status))
@@ -795,104 +815,102 @@ export const repairs = {
         return respond(presentWo(wo, { detail: true }));
     }),
 
-    /** Technician proposes repair items/parts (no prices). Admin prices it afterwards. */
-    proposeItems: handler(async (woId, { items, note }) => {
+    /**
+     * Technician sends priced options straight to the customer. The system adds
+     * "no repair" (the inspection fee) on an initial quotation, or "skip the
+     * extra work" (0 THB) on an additional one.
+     */
+    proposeQuotation: handler(async (woId, { options, note } = {}) => {
         const user = requireRole("TECHNICIAN");
         const wo = loadWo(woId, user);
         const db = getDb();
         let kind;
         if (wo.status === "DIAGNOSING") kind = "INITIAL";
-        else if (["APPROVED", "REPAIRING"].includes(wo.status)) kind = "ADDITIONAL";
-        else throw bad("เสนอรายการซ่อมได้ระหว่างตรวจเช็กหรือระหว่างซ่อมเท่านั้น", "Items can only be proposed while diagnosing or repairing", 409);
-        if (!wo.diagnosis) throw bad("บันทึกผลตรวจก่อนเสนอรายการ", "Record the diagnosis first", 409);
+        else if (["APPROVED", "WAITING_PARTS", "REPAIRING"].includes(wo.status)) kind = "ADDITIONAL";
+        else throw bad("เสนอตัวเลือกได้ระหว่างตรวจเช็กหรือระหว่างซ่อมเท่านั้น", "Options can only be offered while diagnosing or repairing", 409);
+        if (!wo.diagnosis) throw bad("บันทึกผลตรวจก่อนเสนอตัวเลือก", "Record the diagnosis first", 409);
+        if (!Array.isArray(options) || options.length < 1 || options.length > 5) throw bad("เสนอได้ 1-5 ตัวเลือก", "Offer 1 to 5 options");
         const same = db.quotations.filter((q) => q.work_order_id === woId && q.kind === kind);
-        if (same.some((q) => ["DRAFT", "SENT"].includes(q.status))) throw bad("มีใบเสนอราคาที่รอดำเนินการอยู่แล้ว", "There is already a pending quotation", 409);
+        if (same.some((q) => ["DRAFT", "SENT"].includes(q.status))) throw bad("มีใบเสนอราคาที่รอลูกค้าตอบอยู่แล้ว", "A quotation is already waiting for the customer", 409);
+        const priced = options.map((o) => {
+            if (!String(o.title || "").trim()) throw bad("ตั้งชื่อทุกตัวเลือก", "Every option needs a name");
+            const items = normalizeItems(o.items, { requirePrice: true });
+            const total = items.reduce((s, i) => s + i.qty * i.unit_price, 0);
+            if (total <= 0) throw bad("ทุกตัวเลือกต้องมีราคามากกว่า 0", "Every option needs a total above 0");
+            return { option_id: newId(), kind: "REPAIR", title: o.title.trim(), description: o.description?.trim() || null, items, total };
+        });
+        const system = kind === "INITIAL"
+            ? { option_id: newId(), kind: "NO_REPAIR", title: "ไม่ซ่อม รับเครื่องคืน", description: `ตรวจเช็กฟรีเมื่อซ่อม หากไม่ซ่อมคิดค่าตรวจเช็ก ${NO_REPAIR_FEE} บาท`, items: [{ item_id: newId(), type: "LABOR", description: "ค่าตรวจเช็ก (ไม่ซ่อม)", part_id: null, qty: 1, unit_price: NO_REPAIR_FEE }], total: NO_REPAIR_FEE }
+            : { option_id: newId(), kind: "SKIP_EXTRA", title: "ไม่ทำงานเพิ่ม", description: "ซ่อมต่อตามที่อนุมัติไว้เดิม ไม่มีค่าใช้จ่ายเพิ่ม", items: [], total: 0 };
         const q = {
             quotation_id: newId(),
             work_order_id: woId,
-            revision: same.length + 1,
+            revision: db.quotations.filter((x) => x.work_order_id === woId).length + 1,
             kind,
-            status: "DRAFT",
-            items: normalizeItems(items, { requirePrice: false }).map((i) => ({ ...i, unit_price: 0 })),
+            status: "SENT",
+            options: [...priced, system],
+            selected_option_id: null,
+            items: [],
             note: note?.trim() || null,
             created_by: user.user_id,
             created_at: now(),
-            sent_at: null,
+            sent_at: now(),
             decided_by: null,
             decided_at: null,
             decision_note: null
         };
         db.quotations.push(q);
+        if (kind === "INITIAL") setWoStatus(wo, "WAITING_APPROVAL", user, `ส่งตัวเลือก ${q.options.length} แบบ Rev.${q.revision}`);
         return respond(presentWo(wo, { detail: true }));
     }),
 
-    /** Admin sets prices on a DRAFT and sends it to the customer. */
-    priceAndSend: handler(async (quotationId, { items, note }) => {
-        const user = requireRole("ADMIN");
-        const q = loadQuotation(quotationId);
-        const wo = loadWo(q.work_order_id, user);
-        if (q.status !== "DRAFT") throw bad("ส่งได้เฉพาะใบเสนอราคาฉบับร่าง", "Only draft quotations can be sent", 409);
-        q.items = normalizeItems(items, { requirePrice: true });
-        if (quotationTotal(q) <= 0) throw bad("ยอดรวมต้องมากกว่า 0", "Total must be greater than 0");
-        q.note = note?.trim() || q.note;
-        q.status = "SENT";
-        q.sent_at = now();
-        if (q.kind === "INITIAL") setWoStatus(wo, "WAITING_APPROVAL", user, `ส่งใบเสนอราคา Rev.${q.revision}`);
-        return respond(presentWo(wo, { detail: true }));
-    }),
-
-    /** Rejected quotation -> new revision (never overwrite the old one). */
-    reviseQuotation: handler(async (quotationId) => {
-        const user = requireRole("ADMIN");
-        const q = loadQuotation(quotationId);
-        const wo = loadWo(q.work_order_id, user);
-        if (q.status !== "REJECTED") throw bad("แก้ไขได้เฉพาะใบที่ถูกปฏิเสธ (สร้างฉบับใหม่)", "Only rejected quotations can be revised", 409);
-        const db = getDb();
-        const same = db.quotations.filter((x) => x.work_order_id === q.work_order_id && x.kind === q.kind);
-        if (same.some((x) => ["DRAFT", "SENT"].includes(x.status))) throw bad("มีฉบับใหม่อยู่แล้ว", "A newer revision already exists", 409);
-        db.quotations.push({
-            ...q,
-            quotation_id: newId(),
-            revision: same.length + 1,
-            status: "DRAFT",
-            items: q.items.map((i) => ({ ...i, item_id: newId() })),
-            created_by: user.user_id,
-            created_at: now(),
-            sent_at: null,
-            decided_by: null,
-            decided_at: null,
-            decision_note: null
-        });
-        return respond(presentWo(wo, { detail: true }));
-    }),
-
-    /** Customer approves/rejects their own quotation; admin may do it for walk-in customers. */
-    decideQuotation: handler(async (quotationId, { approve, note }) => {
+    /** The customer picks one option; the shop records it for walk-in customers. */
+    decideQuotation: handler(async (quotationId, { option_id: optionId, note } = {}) => {
         const user = requireRole("CUSTOMER", "ADMIN");
         const q = loadQuotation(quotationId);
         const wo = loadWo(q.work_order_id, user);
         if (has(user, "ADMIN") && !has(user, "CUSTOMER") && wo.source !== "WALK_IN") {
-            throw bad("ลูกค้าที่จองผ่านระบบต้องอนุมัติเอง", "Booked customers must approve their own quotation", 403);
+            throw bad("ลูกค้าที่มีบัญชีต้องเลือกเอง", "Customers with an account choose for themselves", 403);
         }
-        if (q.status !== "SENT") throw bad("ใบเสนอราคานี้ไม่ได้รอการอนุมัติ", "This quotation is not awaiting a decision", 409);
-        q.status = approve ? "APPROVED" : "REJECTED";
+        if (q.status !== "SENT") throw bad("ใบเสนอราคานี้ไม่ได้รอการตอบ", "This quotation is not awaiting a decision", 409);
+        const option = (q.options || []).find((o) => o.option_id === optionId);
+        if (!option) throw bad("ไม่พบตัวเลือกนี้", "Option not found on this quotation", 404);
+        const skipped = option.kind === "SKIP_EXTRA";
+        q.status = skipped ? "REJECTED" : "APPROVED";
+        q.selected_option_id = option.option_id;
+        q.items = skipped ? [] : option.items.map((i) => ({ ...i, item_id: newId() }));
         q.decided_by = user.user_id;
         q.decided_at = now();
         q.decision_note = note?.trim() || null;
+        const chose = `เลือก “${option.title}” Rev.${q.revision}`;
         if (q.kind === "INITIAL") {
-            if (approve) setWoStatus(wo, "APPROVED", user, `อนุมัติใบเสนอราคา Rev.${q.revision}`);
-            else setWoStatus(wo, "DIAGNOSING", user, `ปฏิเสธใบเสนอราคา Rev.${q.revision}`);
+            if (option.kind === "NO_REPAIR") {
+                wo.repair_declined = true;
+                wo.ready_at = now();
+                setWoStatus(wo, "COMPLETED", user, chose);
+            } else {
+                setWoStatus(wo, "APPROVED", user, chose);
+            }
         } else {
-            getDb().workOrderHistory.push({ id: newId(), work_order_id: wo.work_order_id, old_status: wo.status, new_status: wo.status, changed_by: user.user_id, note: `${approve ? "อนุมัติ" : "ปฏิเสธ"}งานเพิ่มเติม Rev.${q.revision}`, created_at: now() });
+            getDb().workOrderHistory.push({ id: newId(), work_order_id: wo.work_order_id, old_status: wo.status, new_status: wo.status, changed_by: user.user_id, note: chose, created_at: now() });
         }
+        return respond(presentWo(wo, { detail: true }));
+    }),
+
+    waitForParts: handler(async (woId, note) => {
+        const user = requireRole("TECHNICIAN");
+        const wo = loadWo(woId, user);
+        if (!["APPROVED", "REPAIRING"].includes(wo.status)) throw bad("ตั้งรออะไหล่ได้หลังอนุมัติหรือระหว่างซ่อม", "Only approved or in-repair jobs can wait for parts", 409);
+        if (!note?.trim()) throw bad("ระบุว่ารออะไหล่อะไร", "Say which part is on order");
+        setWoStatus(wo, "WAITING_PARTS", user, note.trim());
         return respond(presentWo(wo, { detail: true }));
     }),
 
     startRepair: handler(async (woId) => {
         const user = requireRole("TECHNICIAN");
         const wo = loadWo(woId, user);
-        if (wo.status !== "APPROVED") throw bad("เริ่มซ่อมได้หลังลูกค้าอนุมัติแล้ว", "Repair can start only after approval", 409);
-        setWoStatus(wo, "REPAIRING", user);
+        if (!["APPROVED", "WAITING_PARTS"].includes(wo.status)) throw bad("เริ่มซ่อมได้หลังลูกค้าอนุมัติแล้ว", "Repair can start only after approval", 409);
+        setWoStatus(wo, "REPAIRING", user, wo.status === "WAITING_PARTS" ? "อะไหล่มาแล้ว เริ่มซ่อม" : null);
         return respond(presentWo(wo, { detail: true }));
     }),
 
@@ -912,6 +930,7 @@ export const repairs = {
         if (wo.status !== "TESTING") throw bad("บันทึกผลทดสอบได้ในขั้นทดสอบเท่านั้น", "Tests can only be recorded while testing", 409);
         if (!notes?.trim()) throw bad("กรุณาบันทึกรายละเอียดการทดสอบ", "Test notes are required");
         wo.test_result = { passed: Boolean(passed), notes: notes.trim(), tested_by: user.user_id, tested_at: now() };
+        if (passed) wo.ready_at = now();
         setWoStatus(wo, passed ? "COMPLETED" : "REPAIRING", user, passed ? "ทดสอบผ่าน" : "ทดสอบไม่ผ่าน กลับไปซ่อม");
         return respond(presentWo(wo, { detail: true }));
     }),
@@ -921,7 +940,7 @@ export const repairs = {
         const user = requireRole("ADMIN");
         const wo = loadWo(woId, user);
         if (wo.handed_over_at) throw bad("ส่งมอบเครื่องไปแล้ว", "Already handed over", 409);
-        if (wo.status !== "COMPLETED" || !wo.test_result?.passed) throw bad("ต้องซ่อมเสร็จและทดสอบผ่านก่อนส่งมอบ", "The repair must be completed and tested first", 409);
+        if (wo.status !== "COMPLETED" || !(wo.test_result?.passed || wo.repair_declined)) throw bad("ต้องซ่อมเสร็จและทดสอบผ่านก่อนส่งมอบ", "The repair must be completed and tested first", 409);
         const pay = paymentSummary(woId);
         if (pay.balance > 0) {
             if (!exceptionReason?.trim()) throw bad(`ยังค้างชำระ ${pay.balance} บาท ต้องให้ Admin อนุมัติข้อยกเว้นพร้อมเหตุผล`, `Outstanding ${pay.balance} THB — an admin exception with a reason is required`, 409);
@@ -1010,7 +1029,7 @@ export const inventory = {
     issueForWorkOrder: handler(async (woId, { partId, qty }) => {
         const user = requireRole("ADMIN");
         const wo = loadWo(woId, user);
-        if (!["APPROVED", "REPAIRING", "TESTING"].includes(wo.status)) throw bad("เบิกอะไหล่ได้หลังอนุมัติและก่อนปิดงาน", "Parts can be issued only after approval and before closing", 409);
+        if (!["APPROVED", "WAITING_PARTS", "REPAIRING", "TESTING"].includes(wo.status)) throw bad("เบิกอะไหล่ได้หลังอนุมัติและก่อนปิดงาน", "Parts can be issued only after approval and before closing", 409);
         const allowance = partsAllowance(woId).find((p) => p.part_id === partId);
         if (!allowance) throw bad("อะไหล่นี้ไม่อยู่ในขอบเขตงานที่อนุมัติ", "This part is not in the approved scope", 409);
         const n = Number(qty);
@@ -1190,8 +1209,9 @@ export const dashboard = {
             bookings_overdue: db.bookings.filter((b) => OPEN_BOOKING.includes(b.status) && slotStarted(b.scheduled_at)).length,
             open_work_orders: wos.filter((w) => OPEN_WO.includes(w.status)).length,
             waiting_approval: wos.filter((w) => w.status === "WAITING_APPROVAL").length,
-            drafts_to_price: db.quotations.filter((q) => q.status === "DRAFT").length,
+            waiting_parts: wos.filter((w) => w.status === "WAITING_PARTS").length,
             ready_for_handover: wos.filter((w) => w.status === "COMPLETED" && !w.handed_over_at).length,
+            overdue_pickups: wos.filter((w) => w.pickup?.overdue).sort((a, b) => b.pickup.days_overdue - a.pickup.days_overdue),
             unassigned: wos.filter((w) => OPEN_WO.includes(w.status) && !w.technician_id).length,
             low_stock: db.parts.filter((p) => p.stock <= p.reorder_level).map((p) => ({ part_id: p.part_id, name: p.name, stock: p.stock, reorder_level: p.reorder_level })),
             outstanding_total: wos.filter((w) => w.status !== "CANCELLED").reduce((s, w) => s + w.payment.balance, 0),

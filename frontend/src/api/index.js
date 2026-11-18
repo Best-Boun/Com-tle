@@ -35,17 +35,14 @@ const repairs = USING_MOCK ? mock.repairs : {
     ),
     startDiagnosis: (id) => refreshLiveResult(httpRepairs.startDiagnosis(id)),
     saveDiagnosis: (id, diagnosis) => refreshLiveResult(httpRepairs.saveDiagnosis(id, diagnosis)),
-    proposeItems: (id, input) => refreshLiveResult(httpRepairs.proposeItems(id, input)),
-    priceAndSend: (id, input) => refreshLiveResult(httpRepairs.priceAndSend(id, input)),
-    reviseQuotation: (id) => refreshLiveResult(httpRepairs.reviseQuotation(id)),
+    proposeQuotation: (id, input) => refreshLiveResult(httpRepairs.proposeQuotation(id, input)),
     decideQuotation: (id, input) => refreshLiveResult(httpRepairs.decideQuotation(id, input)),
+    waitForParts: (id, note) => refreshLiveResult(httpRepairs.waitForParts(id, note)),
     startRepair: (id) => refreshLiveResult(httpRepairs.startRepair(id)),
     recordResult: (id, result) => refreshLiveResult(httpRepairs.recordResult(id, result)),
     recordTest: (id, input) => refreshLiveResult(httpRepairs.recordTest(id, input)),
-    handover: async (id, input) => {
-        await httpPayments.ensureBill(id);
-        return refreshLiveResult(httpRepairs.handover(id, input));
-    },
+    // Repair-Service brings the bill up to date itself before checking the balance.
+    handover: (id, input) => refreshLiveResult(httpRepairs.handover(id, input)),
     cancel: (id, input) => refreshLiveResult(httpRepairs.cancel(id, input))
 };
 
@@ -63,6 +60,7 @@ const OPEN_WORK_ORDER_STATUSES = [
     "DIAGNOSING",
     "WAITING_APPROVAL",
     "APPROVED",
+    "WAITING_PARTS",
     "REPAIRING",
     "TESTING"
 ];
@@ -87,13 +85,14 @@ const dashboard = USING_MOCK ? mock.dashboard : {
             bookings_overdue: bookings.bookings_overdue,
             open_work_orders: workOrders.filter((workOrder) => OPEN_WORK_ORDER_STATUSES.includes(workOrder.status)).length,
             waiting_approval: count("WAITING_APPROVAL"),
-            drafts_to_price: workOrders.reduce(
-                (total, workOrder) => total + (workOrder.has_draft_quotation ? 1 : 0),
-                0
-            ),
+            waiting_parts: count("WAITING_PARTS"),
             ready_for_handover: workOrders.filter(
                 (workOrder) => workOrder.status === "COMPLETED" && !workOrder.handed_over_at
             ).length,
+            // Free storage is over: the shop should call these customers.
+            overdue_pickups: workOrders
+                .filter((workOrder) => workOrder.pickup?.overdue && !workOrder.handed_over_at)
+                .sort((a, b) => b.pickup.days_overdue - a.pickup.days_overdue),
             unassigned: workOrders.filter(
                 (workOrder) => OPEN_WORK_ORDER_STATUSES.includes(workOrder.status) && !workOrder.technician_id
             ).length,

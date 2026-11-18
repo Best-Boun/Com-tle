@@ -57,19 +57,7 @@ function createWorkOrderRouter({ workOrderService, authenticate }) {
         "/work-orders/:workOrderId/quotations",
         authenticate,
         requireAnyPermission(PERMISSIONS.REPAIR_ITEM_PROPOSE),
-        controller.proposeItems
-    );
-    router.put(
-        "/quotations/:quotationId/send",
-        authenticate,
-        requireAnyPermission(PERMISSIONS.QUOTATION_SET_PRICE),
-        controller.priceAndSend
-    );
-    router.post(
-        "/quotations/:quotationId/revise",
-        authenticate,
-        requireAnyPermission(PERMISSIONS.QUOTATION_SET_PRICE),
-        controller.reviseQuotation
+        controller.proposeQuotation
     );
     router.post(
         "/quotations/:quotationId/decision",
@@ -86,6 +74,18 @@ function createWorkOrderRouter({ workOrderService, authenticate }) {
         authenticate,
         requireAnyPermission(PERMISSIONS.REPAIR_START),
         controller.startRepair
+    );
+    router.post(
+        "/work-orders/:workOrderId/parts/wait",
+        authenticate,
+        requireAnyPermission(PERMISSIONS.REPAIR_START),
+        controller.waitForParts
+    );
+    router.post(
+        "/work-orders/:workOrderId/bill",
+        authenticate,
+        requireAnyPermission(PERMISSIONS.HANDOVER_COMPLETE),
+        controller.syncBill
     );
     router.put(
         "/work-orders/:workOrderId/repair/result",
@@ -164,4 +164,4 @@ function createWorkOrderRouter({ workOrderService, authenticate }) {
     return router;
 }
 
-module.exports = createWorkOrderRouter;
+module.exports = createWorkOrderRouter;

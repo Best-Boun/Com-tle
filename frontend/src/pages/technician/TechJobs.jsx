@@ -10,15 +10,16 @@ import { deviceLabel } from "../../components/repair.jsx";
 import { Icon } from "../../components/icons.jsx";
 import "../admin/admin.css";
 
-const ACTIVE = ["PENDING", "DIAGNOSING", "WAITING_APPROVAL", "APPROVED", "REPAIRING", "TESTING"];
+const ACTIVE = ["PENDING", "DIAGNOSING", "WAITING_APPROVAL", "APPROVED", "WAITING_PARTS", "REPAIRING", "TESTING"];
 
 /** What the technician should do next, per status. */
 function nextStep(w, L) {
     switch (w.status) {
         case "PENDING": return L("เริ่มตรวจเช็ก", "Start diagnosis");
-        case "DIAGNOSING": return w.has_pending_quotation ? L("รอร้านตั้งราคา", "Waiting for pricing") : L("บันทึกผลตรวจและเสนอรายการ", "Record diagnosis & propose items");
-        case "WAITING_APPROVAL": return L("รอลูกค้าอนุมัติ", "Waiting for customer");
+        case "DIAGNOSING": return L("บันทึกผลตรวจและเสนอตัวเลือก", "Record diagnosis & offer options");
+        case "WAITING_APPROVAL": return L("รอลูกค้าเลือก", "Waiting for customer");
         case "APPROVED": return L("เริ่มซ่อมได้", "Ready to repair");
+        case "WAITING_PARTS": return L("รออะไหล่ แล้วเริ่มซ่อม", "Waiting for parts, then repair");
         case "REPAIRING": return L("ซ่อมแล้วบันทึกผล", "Repair, then record result");
         case "TESTING": return L("บันทึกผลทดสอบ", "Record test result");
         default: return null;
