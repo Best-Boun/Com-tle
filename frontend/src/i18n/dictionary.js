@@ -8,11 +8,28 @@ export const DICT = {
         "role.TECHNICIAN": "ช่างซ่อม",
         "role.ADMIN": "ผู้ดูแลร้าน",
 
-        "status.booking.PENDING": "รอร้านยืนยัน",
-        "status.booking.CONFIRMED": "ยืนยันแล้ว",
+        "status.booking.PENDING": "รอนำเครื่องมา",
+        "status.booking.CONFIRMED": "นัดแล้ว (ระบบเดิม)",
         "status.booking.COMPLETED": "รับเครื่องแล้ว",
         "status.booking.CANCELLED": "ยกเลิก",
+        "status.booking.EXPIRED": "หมดอายุ",
         "status.booking.NO_SHOW": "ไม่มาตามนัด",
+
+        "device.NOTEBOOK": "โน้ตบุ๊ก",
+        "device.DESKTOP": "คอมพิวเตอร์ตั้งโต๊ะ (PC)",
+        "device.ALL_IN_ONE": "All-in-One",
+        "device.OTHER": "อื่น ๆ",
+
+        "symptom.WONT_POWER_ON": "เปิดไม่ติด / ดับเอง",
+        "symptom.DISPLAY": "จอไม่แสดงผล / จอมีปัญหา",
+        "symptom.SLOW_OR_FREEZING": "ช้า ค้าง รีสตาร์ทเอง",
+        "symptom.BATTERY_OR_CHARGING": "แบตเตอรี่ / ชาร์จไม่เข้า",
+        "symptom.KEYBOARD_TOUCHPAD_PORTS": "คีย์บอร์ด ทัชแพด พอร์ต",
+        "symptom.OVERHEATING_OR_NOISE": "ร้อนผิดปกติ / พัดลมดัง",
+        "symptom.LIQUID_OR_DROP_DAMAGE": "โดนน้ำ / ตกหล่น",
+        "symptom.SOFTWARE_OR_VIRUS": "ระบบ โปรแกรม ไวรัส",
+        "symptom.DATA_RECOVERY": "กู้ข้อมูล",
+        "symptom.OTHER": "อื่น ๆ / ไม่แน่ใจ",
 
         "status.wo.RECEIVED": "รับเครื่อง",
         "status.wo.PENDING": "รอตรวจเช็ก",
@@ -57,7 +74,7 @@ export const DICT = {
         "item.LABOR": "ค่าแรง",
         "item.PART": "อะไหล่",
 
-        "source.BOOKING": "จากการจอง",
+        "source.BOOKING": "จากการแจ้งซ่อม",
         "source.WALK_IN": "Walk-in",
 
         "common.save": "บันทึก",
@@ -76,11 +93,28 @@ export const DICT = {
         "role.TECHNICIAN": "Technician",
         "role.ADMIN": "Shop admin",
 
-        "status.booking.PENDING": "Waiting for shop",
-        "status.booking.CONFIRMED": "Confirmed",
+        "status.booking.PENDING": "Waiting for the device",
+        "status.booking.CONFIRMED": "Appointment (old system)",
         "status.booking.COMPLETED": "Device received",
         "status.booking.CANCELLED": "Cancelled",
+        "status.booking.EXPIRED": "Expired",
         "status.booking.NO_SHOW": "No-show",
+
+        "device.NOTEBOOK": "Notebook",
+        "device.DESKTOP": "Desktop PC",
+        "device.ALL_IN_ONE": "All-in-One",
+        "device.OTHER": "Other",
+
+        "symptom.WONT_POWER_ON": "Won't turn on / shuts down",
+        "symptom.DISPLAY": "No picture / screen problem",
+        "symptom.SLOW_OR_FREEZING": "Slow, freezing, restarting",
+        "symptom.BATTERY_OR_CHARGING": "Battery / not charging",
+        "symptom.KEYBOARD_TOUCHPAD_PORTS": "Keyboard, touchpad, ports",
+        "symptom.OVERHEATING_OR_NOISE": "Overheating / noisy fan",
+        "symptom.LIQUID_OR_DROP_DAMAGE": "Liquid spill / dropped",
+        "symptom.SOFTWARE_OR_VIRUS": "System, software, virus",
+        "symptom.DATA_RECOVERY": "Data recovery",
+        "symptom.OTHER": "Other / not sure",
 
         "status.wo.RECEIVED": "Device received",
         "status.wo.PENDING": "Waiting for inspection",
@@ -125,7 +159,7 @@ export const DICT = {
         "item.LABOR": "Labour",
         "item.PART": "Part",
 
-        "source.BOOKING": "From booking",
+        "source.BOOKING": "From a repair request",
         "source.WALK_IN": "Walk-in",
 
         "common.save": "Save",
@@ -143,7 +177,7 @@ export const DICT = {
 
 /** Badge colour per status: amber = waiting on someone, blue = in progress, green = done. */
 export const TONES = {
-    booking: { PENDING: "amber", CONFIRMED: "blue", COMPLETED: "green", CANCELLED: "grey", NO_SHOW: "red" },
+    booking: { PENDING: "amber", CONFIRMED: "blue", COMPLETED: "green", CANCELLED: "grey", EXPIRED: "grey", NO_SHOW: "red" },
     wo: { PENDING: "grey", DIAGNOSING: "blue", WAITING_APPROVAL: "amber", APPROVED: "blue", REPAIRING: "blue", TESTING: "blue", COMPLETED: "green", CANCELLED: "grey", HANDED_OVER: "green" },
     quote: { DRAFT: "grey", SENT: "amber", APPROVED: "green", REJECTED: "red" },
     pay: { UNPAID: "red", PARTIAL: "amber", PAID: "green", PARTIALLY_REFUNDED: "blue", REFUNDED: "grey" },

@@ -1,7 +1,7 @@
 const crypto = require("node:crypto");
 const jwt = require("jsonwebtoken");
 const AppError = require("../../shared/errors/AppError");
-const { OPEN_STATUSES, SLOT_OCCUPYING_STATUSES } = require("../src/constants");
+const { OPEN_STATUSES } = require("../src/constants");
 
 const ISSUER = "test-issuer";
 const AUDIENCE = "test-audience";
@@ -25,20 +25,21 @@ function signToken(userId, roles) {
 // 2026-11-11 10:00 in Asia/Bangkok
 const FIXED_NOW = new Date("2026-11-11T03:00:00Z");
 
+const SERVICE_ID = "11111111-1111-4111-8111-111111111111";
+const DIAGNOSIS_SERVICE_ID = "22222222-2222-4222-8222-222222222222";
+
 const TEST_CONFIG = {
     timezone: "Asia/Bangkok",
-    slotTimes: ["09:00", "10:00", "11:00", "13:00"],
-    slotCapacity: 2,
-    maxDaysAhead: 30,
+    diagnosisServiceId: DIAGNOSIS_SERVICE_ID,
+    maxOpenRequestsPerCustomer: 3,
+    requestExpiryDays: 30,
     catalogServiceUrl: "http://catalog.test",
     repairServiceUrl: "http://repair.test",
     serviceCallTimeoutMs: 1000
 };
 
-const SERVICE_ID = "11111111-1111-4111-8111-111111111111";
-
 /** In-memory stand-in for bookingRepository (same method names). */
-function createFakeBookingRepository() {
+function createFakeBookingRepository({ now = () => FIXED_NOW } = {}) {
     const bookings = new Map();
     const history = [];
 
@@ -55,21 +56,17 @@ function createFakeBookingRepository() {
         }
     }
 
-    const active = (b) => SLOT_OCCUPYING_STATUSES.includes(b.status);
+    function matchesSearch(b, search) {
+        const text = search.trim().toUpperCase();
+        if (/^(RQ|BK)-/.test(text)) return b.booking_number.startsWith(text);
+        const digits = text.replace(/\D/g, "");
+        return Boolean(digits) && String(b.contact_phone || "").includes(digits);
+    }
 
     return {
         bookings,
         history,
         transaction: inTransaction,
-        withSlotLock: (key, work) => inTransaction(work),
-        async countActiveAt(trx, scheduledAt) {
-            return [...bookings.values()].filter((b) => active(b) && b.scheduled_at.getTime() === scheduledAt.getTime()).length;
-        },
-        async listActiveTimes(from, to) {
-            return [...bookings.values()]
-                .filter((b) => active(b) && b.scheduled_at >= from && b.scheduled_at < to)
-                .map((b) => b.scheduled_at);
-        },
         async insertBooking(trx, booking) {
             if ([...bookings.values()].some((b) => b.booking_number === booking.booking_number)) {
                 const error = new Error("Duplicate entry");
@@ -78,13 +75,13 @@ function createFakeBookingRepository() {
             }
             bookings.set(booking.booking_id, {
                 ...booking,
-                scheduled_at: new Date(booking.scheduled_at),
                 work_order_id: null,
                 technician_id: null,
-                technician_claimed_at: null,
                 cancelled_at: null,
                 cancelled_by: null,
-                cancellation_reason: null
+                cancellation_reason: null,
+                created_at: now(),
+                updated_at: now()
             });
         },
         async insertHistory(trx, entry) {
@@ -96,47 +93,24 @@ function createFakeBookingRepository() {
         async findHistory(id) {
             return history.filter((h) => h.booking_id === id);
         },
-        async list({ customerId, status, from, to }, { limit, offset }) {
+        async list({ customerId, status, from, to, search }, { limit, offset }) {
             let items = [...bookings.values()];
             if (customerId) items = items.filter((b) => b.customer_id === customerId);
             if (status) items = items.filter((b) => b.status === status);
-            if (from) items = items.filter((b) => b.scheduled_at >= from);
-            if (to) items = items.filter((b) => b.scheduled_at < to);
+            if (from) items = items.filter((b) => b.created_at >= from);
+            if (to) items = items.filter((b) => b.created_at < to);
+            if (search) items = items.filter((b) => matchesSearch(b, search));
             return { items: items.slice(offset, offset + limit).map((b) => ({ ...b })), total: items.length };
+        },
+        async countOpenByCustomer(customerId) {
+            return [...bookings.values()]
+                .filter((b) => b.customer_id === customerId && OPEN_STATUSES.includes(b.status)).length;
         },
         async updateStatus(trx, id, fromStatus, changes) {
             const current = bookings.get(id);
             if (!current || current.status !== fromStatus) return false;
             bookings.set(id, { ...current, ...changes });
             return true;
-        },
-        async listOpenBetween(from, to) {
-            return [...bookings.values()]
-                .filter((b) => OPEN_STATUSES.includes(b.status) && b.scheduled_at >= from && b.scheduled_at < to)
-                .sort((a, b) => a.scheduled_at - b.scheduled_at)
-                .map((b) => ({ ...b }));
-        },
-        async claim(id, technicianId, claimedAt) {
-            const current = bookings.get(id);
-            if (!current || current.technician_id || !OPEN_STATUSES.includes(current.status)) return false;
-            bookings.set(id, { ...current, technician_id: technicianId, technician_claimed_at: claimedAt });
-            return true;
-        },
-        async release(id, technicianId = null) {
-            const current = bookings.get(id);
-            if (!current || !OPEN_STATUSES.includes(current.status)) return false;
-            if (technicianId && current.technician_id !== technicianId) return false;
-            bookings.set(id, { ...current, technician_id: null, technician_claimed_at: null });
-            return true;
-        },
-        async countNoShows(customerIds) {
-            const counts = new Map();
-            for (const b of bookings.values()) {
-                if (b.status === "NO_SHOW" && customerIds.includes(b.customer_id)) {
-                    counts.set(b.customer_id, (counts.get(b.customer_id) || 0) + 1);
-                }
-            }
-            return counts;
         }
     };
 }
@@ -151,14 +125,16 @@ function createFakeClients() {
         catalogClient: {
             async getActiveService(serviceId, ctx) {
                 calls.catalog.push({ serviceId, ctx });
-                if (serviceId !== SERVICE_ID) {
+                const services = {
+                    [SERVICE_ID]: { service_code: "PC-CLEAN", service_name: "PC Cleaning", starting_price: 500 },
+                    [DIAGNOSIS_SERVICE_ID]: { service_code: "HW-DIAG", service_name: "Hardware Diagnosis", starting_price: 300 }
+                };
+                if (!services[serviceId]) {
                     throw new AppError("Selected service is not available", 400);
                 }
                 return {
-                    service_id: SERVICE_ID,
-                    service_code: "PC-CLEAN",
-                    service_name: "PC Cleaning",
-                    starting_price: 500,
+                    service_id: serviceId,
+                    ...services[serviceId],
                     currency: "THB",
                     is_active: true,
                     category_is_active: true
@@ -192,6 +168,7 @@ module.exports = {
     FIXED_NOW,
     TEST_CONFIG,
     SERVICE_ID,
+    DIAGNOSIS_SERVICE_ID,
     createFakeBookingRepository,
     createFakeClients
 };

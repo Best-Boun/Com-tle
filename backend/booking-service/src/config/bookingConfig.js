@@ -1,4 +1,8 @@
-const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+// Catalog seed "HW-DIAG" (Hardware Diagnosis): what a request is for when the
+// customer does not pick a known service.
+const DEFAULT_DIAGNOSIS_SERVICE_ID = "6f1c2a10-0000-4000-8000-000000000003";
 
 function positiveInteger(env, name, fallback) {
     const raw = env[name];
@@ -35,20 +39,18 @@ function loadBookingConfig(env = process.env) {
         throw new Error("BOOKING_TIMEZONE must be a valid IANA time zone");
     }
 
-    const slotTimes = (env.BOOKING_SLOT_TIMES || "09:00,10:00,11:00,13:00,14:00,15:00,16:00")
-        .split(",")
-        .map((time) => time.trim())
-        .filter(Boolean);
-
-    if (slotTimes.length === 0 || !slotTimes.every((time) => TIME_PATTERN.test(time))) {
-        throw new Error("BOOKING_SLOT_TIMES must be a comma-separated list of HH:MM times");
+    const diagnosisServiceId = env.REQUEST_DIAGNOSIS_SERVICE_ID?.trim() || DEFAULT_DIAGNOSIS_SERVICE_ID;
+    if (!UUID_PATTERN.test(diagnosisServiceId)) {
+        throw new Error("REQUEST_DIAGNOSIS_SERVICE_ID must be a UUID");
     }
 
     return {
         timezone,
-        slotTimes: [...new Set(slotTimes)].sort(),
-        slotCapacity: positiveInteger(env, "BOOKING_SLOT_CAPACITY", 2),
-        maxDaysAhead: positiveInteger(env, "BOOKING_MAX_DAYS_AHEAD", 30),
+        diagnosisServiceId,
+        // How many open requests one customer may have at a time.
+        maxOpenRequestsPerCustomer: positiveInteger(env, "REQUEST_MAX_OPEN_PER_CUSTOMER", 5),
+        // Requests nobody brought in are closed after this many days (job: task 2).
+        requestExpiryDays: positiveInteger(env, "REQUEST_EXPIRY_DAYS", 30),
         catalogServiceUrl: serviceUrl(env, "CATALOG_SERVICE_URL"),
         repairServiceUrl: serviceUrl(env, "REPAIR_SERVICE_URL"),
         serviceCallTimeoutMs: positiveInteger(env, "SERVICE_CALL_TIMEOUT_MS", 5000)

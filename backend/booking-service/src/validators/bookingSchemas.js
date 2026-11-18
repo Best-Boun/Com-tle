@@ -1,21 +1,34 @@
 const { z } = require("zod");
-const { BOOKING_STATUS } = require("../constants");
+const { BOOKING_STATUS, DEVICE_TYPES, SYMPTOM_GROUPS } = require("../constants");
 const { isValidDate } = require("../utils/time");
 
 const dateString = z.string().trim().refine(isValidDate, "must be a valid YYYY-MM-DD date");
-const timeString = z.string().trim().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "must be HH:MM");
 const optionalText = (max) => z.union([z.string().trim().max(max), z.null()]).optional();
 
-/** appointment_date + appointment_time are in the shop's time zone (BOOKING_TIMEZONE). */
-const createBookingSchema = z.object({
-    service_id: z.string().uuid(),
-    appointment_date: dateString,
-    appointment_time: timeString,
-    device_type: z.string().trim().min(1).max(100),
+/** Thai phone numbers: keep digits only (e.g. "081-234-5678" -> "0812345678"). */
+function phoneDigits(value) {
+    return String(value).replace(/[\s\-().]/g, "").replace(/^\+66/, "0");
+}
+
+const phoneSchema = z.string().trim().transform(phoneDigits).pipe(
+    z.string().regex(/^0\d{8,9}$/, "must be a Thai phone number, e.g. 0812345678")
+);
+
+/**
+ * A repair request: the device and what the customer sees, no time slot.
+ * service_id is optional, for a known job such as cleaning or an OS install;
+ * otherwise the request is for a diagnosis.
+ */
+const createRequestSchema = z.object({
+    device_type: z.enum(DEVICE_TYPES),
     brand: optionalText(100),
     model: optionalText(150),
     serial_number: optionalText(150),
-    reported_symptom: z.string().trim().min(1).max(5000)
+    symptom_group: z.enum(SYMPTOM_GROUPS),
+    reported_symptom: z.string().trim().min(1).max(5000),
+    contact_name: z.string().trim().min(1).max(150),
+    contact_phone: phoneSchema,
+    service_id: z.union([z.string().uuid(), z.null()]).optional()
 }).strict();
 
 const reasonSchema = z.object({
@@ -26,31 +39,32 @@ const requiredReasonSchema = z.object({
     reason: z.string().trim().min(1).max(500)
 }).strict();
 
-const availabilityQuerySchema = z.object({
-    date: dateString
-});
-
+/**
+ * search: a request number (RQ-... / BK-...) or part of a phone number,
+ * which is what the counter has when the customer walks in.
+ */
 const listQuerySchema = z.object({
     page: z.coerce.number().int().min(1).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
     status: z.enum(Object.values(BOOKING_STATUS)).optional(),
     date: dateString.optional(),
-    customer_id: z.string().uuid().optional()
+    customer_id: z.string().uuid().optional(),
+    search: z.string().trim().min(1).max(40).optional()
 });
+
+const checkInSchema = z.object({
+    accessories: optionalText(1000),
+    intake_terms_acknowledged: z.boolean().optional()
+}).strict();
 
 const uuidSchema = z.string().uuid();
 
-/** Technicians' upcoming queue: today plus the next days (default today + tomorrow). */
-const queueQuerySchema = z.object({
-    days: z.coerce.number().int().min(1).max(7).optional()
-});
-
 module.exports = {
-    queueQuerySchema,
-    createBookingSchema,
+    phoneDigits,
+    createRequestSchema,
     reasonSchema,
     requiredReasonSchema,
-    availabilityQuerySchema,
     listQuerySchema,
+    checkInSchema,
     uuidSchema
 };

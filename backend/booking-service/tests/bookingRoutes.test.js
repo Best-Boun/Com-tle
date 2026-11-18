@@ -47,52 +47,59 @@ const headers = (userId, roles) => ({
 });
 
 const payload = JSON.stringify({
-    service_id: SERVICE_ID,
-    appointment_date: "2026-11-12",
-    appointment_time: "10:00",
-    device_type: "PC",
-    reported_symptom: "เปิดไม่ติด"
+    device_type: "DESKTOP",
+    symptom_group: "WONT_POWER_ON",
+    reported_symptom: "เปิดไม่ติด",
+    contact_name: "สมชาย",
+    contact_phone: "0812345678"
 });
 
-test("health is public, booking routes need a token", async () => {
+test("health is public, request routes need a token", async () => {
     await withServer(async (base) => {
         assert.equal((await fetch(`${base}/health`)).status, 200);
         assert.equal((await fetch(`${base}/me`)).status, 401);
     });
 });
 
-test("customer can create and list own bookings, but not list all", async () => {
+test("customer can create and list own requests, but not list all", async () => {
     await withServer(async (base) => {
         const created = await fetch(base, { method: "POST", headers: headers(C1, ["CUSTOMER"]), body: payload });
         assert.equal(created.status, 201);
-        const booking = (await created.json()).data;
+        const request = (await created.json()).data;
+        assert.equal(request.status, "PENDING");
+        assert.match(request.booking_number, /^RQ-/);
 
         const mine = await fetch(`${base}/me`, { headers: headers(C1, ["CUSTOMER"]) });
         assert.equal((await mine.json()).data.length, 1);
 
         assert.equal((await fetch(base, { headers: headers(C1, ["CUSTOMER"]) })).status, 403);
-        assert.equal((await fetch(`${base}/${booking.booking_id}`, { headers: headers(C1, ["CUSTOMER"]) })).status, 200);
+        assert.equal((await fetch(`${base}/${request.booking_id}`, { headers: headers(C1, ["CUSTOMER"]) })).status, 200);
     });
 });
 
-test("admin cannot create bookings; technician has no booking access", async () => {
+test("admin cannot create requests; technician has no request access", async () => {
     await withServer(async (base) => {
         assert.equal((await fetch(base, { method: "POST", headers: headers(A1, ["ADMIN"]), body: payload })).status, 403);
         assert.equal((await fetch(`${base}/me`, { headers: headers("t1", ["TECHNICIAN"]) })).status, 403);
+        assert.equal((await fetch(`${base}/options`, { headers: headers("t1", ["TECHNICIAN"]) })).status, 403);
     });
 });
 
-test("full flow: create (confirmed) -> check-in (COMPLETED)", async () => {
+test("full flow: create -> counter search by phone -> check-in (COMPLETED)", async () => {
     await withServer(async (base) => {
         const created = await fetch(base, { method: "POST", headers: headers(C1, ["CUSTOMER"]), body: payload });
-        const { booking_id: id, status } = (await created.json()).data;
-        assert.equal(status, "CONFIRMED");
+        const { booking_id: id } = (await created.json()).data;
 
-        assert.equal((await fetch(`${base}/${id}/confirm`, { method: "PATCH", headers: headers(C1, ["CUSTOMER"]) })).status, 403);
-        assert.equal((await fetch(`${base}/${id}/no-show`, { method: "PATCH", headers: headers(C1, ["CUSTOMER"]) })).status, 403);
-        assert.equal((await fetch(`${base}/${id}/no-show`, { method: "PATCH", headers: headers(A1, ["ADMIN"]) })).status, 409);
+        const found = await fetch(`${base}/?search=081-234-5678`, { headers: headers(A1, ["ADMIN"]) });
+        assert.equal(found.status, 200);
+        assert.deepEqual((await found.json()).data.map((r) => r.booking_id), [id]);
 
-        const checkIn = await fetch(`${base}/${id}/check-in`, { method: "POST", headers: headers(A1, ["ADMIN"]) });
+        assert.equal((await fetch(`${base}/${id}/check-in`, { method: "POST", headers: headers(C1, ["CUSTOMER"]) })).status, 403);
+        const checkIn = await fetch(`${base}/${id}/check-in`, {
+            method: "POST",
+            headers: headers(A1, ["ADMIN"]),
+            body: JSON.stringify({ accessories: "สายชาร์จ", intake_terms_acknowledged: true })
+        });
         assert.equal(checkIn.status, 200);
         const body = await checkIn.json();
         assert.equal(body.data.status, "COMPLETED");
@@ -100,30 +107,17 @@ test("full flow: create (confirmed) -> check-in (COMPLETED)", async () => {
     });
 });
 
-test("availability route returns configured slots", async () => {
+test("options are served; the old appointment routes are gone", async () => {
     await withServer(async (base) => {
-        const res = await fetch(`${base}/availability?date=2026-11-12`, { headers: headers(C1, ["CUSTOMER"]) });
-        assert.equal(res.status, 200);
-        assert.deepEqual((await res.json()).data.slots.map((s) => s.time), TEST_CONFIG.slotTimes);
-    });
-});
+        const options = await fetch(`${base}/options`, { headers: headers(C1, ["CUSTOMER"]) });
+        assert.equal(options.status, 200);
+        assert.ok((await options.json()).data.symptom_groups.includes("WONT_POWER_ON"));
 
-test("technicians see the queue and take a job; customers cannot", async () => {
-    await withServer(async (base) => {
-        const T1 = "bbbbbbbb-0000-4000-8000-000000000001";
-        const created = await fetch(base, { method: "POST", headers: headers(C1, ["CUSTOMER"]), body: payload });
-        const { booking_id: id } = (await created.json()).data;
-
-        assert.equal((await fetch(`${base}/queue`, { headers: headers(C1, ["CUSTOMER"]) })).status, 403);
-        const queue = await fetch(`${base}/queue`, { headers: headers(T1, ["TECHNICIAN"]) });
-        assert.equal(queue.status, 200);
-        assert.deepEqual((await queue.json()).data.map((b) => b.booking_id), [id]);
-        assert.equal((await fetch(`${base}/queue`, { headers: headers(A1, ["ADMIN"]) })).status, 200);
-
-        assert.equal((await fetch(`${base}/${id}/claim`, { method: "POST", headers: headers(C1, ["CUSTOMER"]) })).status, 403);
-        const claim = await fetch(`${base}/${id}/claim`, { method: "POST", headers: headers(T1, ["TECHNICIAN"]) });
-        assert.equal(claim.status, 200);
-        assert.equal((await claim.json()).data.technician_id, T1);
-        assert.equal((await fetch(`${base}/${id}/claim`, { method: "DELETE", headers: headers(A1, ["ADMIN"]) })).status, 200);
+        const id = "11111111-1111-4111-8111-111111111111";
+        assert.equal((await fetch(`${base}/availability?date=2026-11-12`, { headers: headers(C1, ["CUSTOMER"]) })).status, 404);
+        assert.equal((await fetch(`${base}/queue`, { headers: headers(A1, ["ADMIN"]) })).status, 404);
+        for (const [path, method] of [[`/${id}/confirm`, "PATCH"], [`/${id}/no-show`, "PATCH"], [`/${id}/claim`, "POST"]]) {
+            assert.equal((await fetch(`${base}${path}`, { method, headers: headers(A1, ["ADMIN"]) })).status, 404, path);
+        }
     });
 });

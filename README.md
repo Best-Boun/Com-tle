@@ -53,7 +53,7 @@ flowchart LR
 |---|---|---|---|
 | API Gateway | 3000 | – | จุดเข้าเดียวของระบบ: ส่งต่อคำขอไปบริการที่ถูกต้อง, กรอง Endpoint ด้วย allowlist, จำกัดจำนวนครั้งการ login |
 | User Service | 3001 | `user_db` | สมัครสมาชิก, เข้าสู่ระบบ, ออก/ต่ออายุ/ยกเลิกโทเคน, โปรไฟล์, บทบาทและสิทธิ์ (RBAC), ผู้ดูแลจัดการบัญชี (เปิด/ปิดบัญชี, เปลี่ยนบทบาท 1 บัญชี 1 บทบาท), รวมบัญชีลูกค้าที่ซ้ำ |
-| Booking Service | 3002 | `booking_db` | ดูช่วงเวลาที่ว่าง, จองคิว (กันจองชนด้วย lock, ยืนยันทันที), คิวงานที่จะเข้ามาให้ช่างรับล่วงหน้า, ยกเลิก / บันทึก "ไม่มาตามนัด" พร้อมเก็บประวัติสถานะ, รับเครื่อง (check-in) แล้วสั่งเปิดใบงานซ่อมให้ช่างที่รับงานไว้ |
+| Booking Service | 3002 | `booking_db` | แจ้งซ่อมล่วงหน้า (เครื่อง + กลุ่มอาการ ไม่มีการเลือกเวลา) ได้เลข RQ, หน้าร้านค้นจากเลข RQ หรือเบอร์โทร, ยกเลิก พร้อมเก็บประวัติสถานะ, รับเครื่อง (check-in) แล้วสั่งเปิดใบงานซ่อม |
 | Service Catalog Service | 3003 | `catalog_db` | หมวดบริการและรายการบริการ พร้อมราคาเริ่มต้น (บาท) และเวลาโดยประมาณ, เปิด/ปิดบริการ, บันทึก audit log ทุกการแก้ไข |
 | Repair Service | 3004 | `repair_db` | ใบงานซ่อม (Work Order) ทั้งจากการจองและ walk-in, มอบหมายช่าง, วินิจฉัย, ใบเสนอราคา (ส่ง/แก้ไข/ลูกค้าตัดสินใจ), ซ่อม, ทดสอบ, ส่งมอบ (เช็กยอดค้างกับ Payment), ยกเลิก, คลังอะไหล่และการเบิก |
 | Inventory Service | 3005 | `inventory_db` | คลังอะไหล่ (โครงพร้อมแล้ว ยังไม่เปิดผ่าน Gateway ตอนนี้ Repair Service ดูแลอะไหล่) |
@@ -70,7 +70,7 @@ Frontend → POST /api/users/auth/login → Gateway (rate limit) → User Servic
 
 Frontend แนบ `Authorization: Bearer <token>` ในทุกคำขอต่อจากนี้ ถ้า access token หมดอายุ Frontend ขอโทเคนใหม่ด้วย refresh token ให้อัตโนมัติ แล้วพาไปหน้าตามบทบาท: ลูกค้า → `/my/bookings`, ช่าง → `/tech`, ผู้ดูแล → `/admin`
 
-**2. ลูกค้าจองคิว**
+**2. ลูกค้าแจ้งซ่อมล่วงหน้า (ไม่บังคับ)**
 
 ```mermaid
 sequenceDiagram
@@ -78,40 +78,32 @@ sequenceDiagram
     participant GW as API Gateway
     participant BS as Booking Service
     participant CS as Catalog Service
-    C->>GW: GET /api/bookings/availability?date=...
-    GW->>BS: GET /availability
-    BS-->>C: ช่วงเวลาที่ยังว่าง (ช่องละ 2 คิว)
+    C->>GW: GET /api/bookings/options
+    BS-->>C: ประเภทเครื่อง + กลุ่มอาการ
     C->>GW: POST /api/bookings
     GW->>BS: POST /
-    BS->>CS: GET /services/:id (ตรวจว่าบริการยังเปิดอยู่)
-    BS->>BS: lock ช่วงเวลา, เช็กว่ายังว่าง, บันทึกการจอง + snapshot ชื่อ/ราคาบริการ
-    BS-->>C: 201 booking (CONFIRMED)
+    BS->>CS: GET /services/:id (บริการตรวจเช็กอาการ หรือบริการที่ลูกค้าเลือก)
+    BS->>BS: บันทึกคำขอ + snapshot ชื่อ/ราคาบริการ
+    BS-->>C: 201 คำขอ (PENDING, เลข RQ-YYYYMMDD-XXXXXX)
 ```
 
-- การจองยืนยันทันที เพราะระบบเช็กแล้วว่าช่องเวลายังว่าง (lock ช่วงเวลาไว้ระหว่างนับ) ผู้ดูแลไม่ต้องกดยืนยันทีละรายการ
-- Booking Service บันทึกชื่อและราคาบริการไว้กับการจอง (snapshot) ถ้าร้านแก้ราคาทีหลัง การจองเดิมก็ยังแสดงราคาตอนที่จอง
+- ไม่มีการเลือกวันเวลา ไม่มีมัดจำ ไม่มี no-show ลูกค้าบอกแค่เครื่อง กลุ่มอาการ รายละเอียด และเบอร์ติดต่อ
+- ถ้าลูกค้าไม่เลือกบริการ คำขอจะเป็นของบริการ "ตรวจเช็กอาการ" (`REQUEST_DIAGNOSIS_SERVICE_ID`, ค่าเริ่มต้นคือ seed HW-DIAG)
+- ลูกค้าหนึ่งคนมีคำขอที่ยังเปิดอยู่ได้ไม่เกิน `REQUEST_MAX_OPEN_PER_CUSTOMER` รายการ (ค่าเริ่มต้น 5)
 
-**3. ช่างรับงานล่วงหน้า**
-
-```
-ช่าง → GET  /api/bookings/queue              นัดวันนี้และพรุ่งนี้ที่ยืนยันแล้ว
-ช่าง → POST /api/bookings/:id/claim          รับงาน (ใครกดก่อนได้ก่อน ช่างคนอื่นรับซ้ำได้ 409)
-ช่าง → DELETE /api/bookings/:id/claim        คืนงานเข้าคิว (ผู้ดูแลก็ปล่อยงานได้)
-```
-
-**4. วันนัด: รับเครื่อง / ไม่มาตามนัด / ยกเลิก**
+**3. ลูกค้านำเครื่องมาที่ร้าน**
 
 ```
-ลูกค้ามา   ผู้ดูแล → POST /api/bookings/:id/check-in
-             Booking Service → POST Repair Service /work-orders  (Idempotency-Key: booking-<id>, ส่ง technician_user_id ของช่างที่รับงาน)
-             ← work_order_id                                       (CONFIRMED → COMPLETED)
+หน้าร้าน  ผู้ดูแล → GET /api/bookings?search=RQ-20261119-...   หรือ ?search=0812345678 (เบอร์โทร)
+รับเครื่อง ผู้ดูแล → POST /api/bookings/:id/check-in  { accessories, intake_terms_acknowledged }
+             Booking Service → POST Repair Service /work-orders  (Idempotency-Key: booking-<id>)
+             ← work_order_id                                       (PENDING → COMPLETED)
 
-ไม่มา      ผู้ดูแล → PATCH /api/bookings/:id/no-show             (กดได้หลังเลยเวลานัด, CONFIRMED → NO_SHOW)
-
-ยกเลิก     ลูกค้า (ก่อนเวลานัด) หรือผู้ดูแล (ต้องมีเหตุผล) → PATCH /api/bookings/:id/cancel
+ยกเลิก     ลูกค้า (เมื่อไรก็ได้ระหว่างที่ยังเปิดอยู่) หรือผู้ดูแล (ต้องมีเหตุผล) → PATCH /api/bookings/:id/cancel
 ```
 
-- กติกา 1 การจอง = 1 ใบงาน ถ้า Repair Service ล่ม การจองจะยังเป็น CONFIRMED แล้วลองใหม่ได้ ไม่เกิดใบงานซ้ำเพราะใช้ Idempotency-Key เดิม
+- กติกา 1 คำขอ = 1 ใบงาน ถ้า Repair Service ล่ม คำขอจะยังเปิดอยู่แล้วลองใหม่ได้ ไม่เกิดใบงานซ้ำเพราะใช้ Idempotency-Key เดิม
+- สัญญากับ Repair ยังใช้ชื่อ `booking_id`, `booking_number` เหมือนเดิม และส่ง `scheduled_at` เป็นเวลาที่ลูกค้าแจ้งซ่อม (คำขอไม่มีเวลานัด)
 - ลูกค้าที่ walk-in เข้ามาที่ร้านจะเปิดใบงานตรงที่ `POST /api/repairs/work-orders/walk-in`
 - หน้าการจองของผู้ดูแลแสดงจำนวนครั้งที่ลูกค้าคนนั้นไม่มาตามนัด
 
@@ -183,18 +175,15 @@ Endpoint ภายใน (เรียกได้เฉพาะระหว่
 
 | Method | Endpoint | ผู้ใช้ | คำอธิบาย |
 |---|---|---|---|
-| GET | `/api/bookings/availability?date=YYYY-MM-DD` | CUSTOMER / ADMIN | ช่วงเวลาที่ยังว่างของวันนั้น |
-| POST | `/api/bookings` | CUSTOMER | จองคิว (บริการ, วันที่, เวลา, อุปกรณ์, อาการ) ได้สถานะ CONFIRMED ทันที |
-| GET | `/api/bookings/me` | CUSTOMER | การจองของฉัน |
-| GET | `/api/bookings` | ADMIN | การจองทั้งหมด (กรองสถานะ/วันที่ได้) พร้อมจำนวนครั้งที่ลูกค้าไม่มาตามนัด |
-| GET | `/api/bookings/:bookingId` | เจ้าของ / ADMIN | รายละเอียดการจอง + ประวัติสถานะ |
-| GET | `/api/bookings/queue?days=2` | TECHNICIAN / ADMIN | คิวที่จะเข้ามา (วันนี้ + วันถัดไป) |
-| POST | `/api/bookings/:bookingId/claim` | TECHNICIAN | รับงานล่วงหน้า |
-| DELETE | `/api/bookings/:bookingId/claim` | ช่างที่รับงาน / ADMIN | คืนงานเข้าคิว |
-| PATCH | `/api/bookings/:bookingId/cancel` | เจ้าของ (ก่อนเวลานัด) / ADMIN (ต้องมีเหตุผล) | ยกเลิกการจอง |
-| PATCH | `/api/bookings/:bookingId/no-show` | ADMIN | บันทึกว่าลูกค้าไม่มาตามนัด (หลังเลยเวลานัด) |
-| POST | `/api/bookings/:bookingId/check-in` | ADMIN | รับเครื่องและเปิดใบงานซ่อม (CONFIRMED → COMPLETED) |
-| PATCH | `/api/bookings/:bookingId/confirm` | ADMIN | ยืนยันการจองเก่าที่ยังเป็น PENDING |
+| GET | `/api/bookings/options` | CUSTOMER / ADMIN | ตัวเลือกของฟอร์ม: `device_types`, `symptom_groups` |
+| POST | `/api/bookings` | CUSTOMER | แจ้งซ่อมล่วงหน้า (`device_type`, `symptom_group`, `reported_symptom`, `contact_name`, `contact_phone`, ยี่ห้อ/รุ่น/S/N, `service_id` ไม่บังคับ) ได้สถานะ PENDING |
+| GET | `/api/bookings/me` | CUSTOMER | คำขอของฉัน |
+| GET | `/api/bookings?search=...` | ADMIN | คำขอทั้งหมด กรองสถานะ/วันที่ได้ และค้นด้วยเลข RQ หรือเบอร์โทร |
+| GET | `/api/bookings/:bookingId` | เจ้าของ / ADMIN | รายละเอียดคำขอ + ประวัติสถานะ |
+| PATCH | `/api/bookings/:bookingId/cancel` | เจ้าของ / ADMIN (ต้องมีเหตุผล) | ยกเลิกคำขอที่ยังเปิดอยู่ |
+| POST | `/api/bookings/:bookingId/check-in` | ADMIN | รับเครื่องและเปิดใบงานซ่อม (PENDING → COMPLETED) |
+
+สถานะ: `PENDING` (รอนำเครื่องมา) → `COMPLETED` (รับเครื่องแล้ว) / `CANCELLED` / `EXPIRED` (ไม่มีใครนำเครื่องมา ปิดอัตโนมัติ) การจองแบบเก่า (`CONFIRMED`) ยังรับเครื่องหรือยกเลิกได้ ส่วน `NO_SHOW` จบแล้ว
 
 สถานะการจอง:
 
@@ -282,13 +271,13 @@ Authorization: Bearer <access token>
 Content-Type: application/json
 
 {
-  "service_id": "7f3c2a10-...",
-  "appointment_date": "2026-11-20",
-  "appointment_time": "10:00",
-  "device_type": "โน้ตบุ๊ก",
+  "device_type": "NOTEBOOK",
   "brand": "Acer",
   "model": "Aspire 5",
-  "reported_symptom": "เปิดไม่ติด"
+  "symptom_group": "WONT_POWER_ON",
+  "reported_symptom": "เปิดไม่ติด ไฟชาร์จไม่ขึ้น",
+  "contact_name": "สมชาย ใจดี",
+  "contact_phone": "081-234-5678"
 }
 ```
 
@@ -297,11 +286,12 @@ Content-Type: application/json
   "success": true,
   "data": {
     "booking_id": "b1d0...",
-    "booking_number": "BK-20261120-FAK643",
-    "status": "CONFIRMED",
-    "service_name": "ตรวจเช็กอาการเบื้องต้น",
+    "booking_number": "RQ-20261119-FAK643",
+    "status": "PENDING",
+    "contact_phone": "0812345678",
+    "service_name": "Hardware Diagnosis",
     "service_starting_price": 300,
-    "scheduled_at": "2026-11-20T03:00:00.000Z"
+    "scheduled_at": null
   }
 }
 ```
@@ -312,7 +302,7 @@ Content-Type: application/json
 | ฐานข้อมูล | ตารางหลัก |
 |---|---|
 | `user_db` | `users`, `customers`, `roles`, `user_roles`, `permissions`, `role_permissions`, `refresh_token_sessions`, `audit_logs` |
-| `booking_db` | `bookings` (snapshot บริการ, `technician_id`), `booking_status_history` |
+| `booking_db` | `bookings` (เก็บคำขอแจ้งซ่อม: snapshot บริการ, `symptom_group`, `contact_phone`), `booking_status_history` |
 | `catalog_db` | `service_categories`, `services`, `catalog_audit_logs` |
 | `repair_db` | `work_orders`, `work_order_devices`, `work_order_status_history`, `work_order_assignments`, `repair_parts_inventory`, `repair_stock_movements` |
 | `payment_db` | `payments`, `refunds`, `payment_audit_logs`, `idempotency_records`, `payment_locks`, `inbox_events`, `outbox_events` |
@@ -333,5 +323,5 @@ npm run dev          # http://localhost:5173
 
 - `frontend/.env` ตั้ง `VITE_USE_MOCK=false` เพื่อต่อ API จริง (ข้อมูลบน Railway) หรือ `true` เพื่อใช้ข้อมูลตัวอย่างที่เก็บในเบราว์เซอร์โดยไม่ต้องรัน backend ทั้งสองโหมดใช้ข้อมูลคนละชุดกัน
 - ฐานข้อมูลใหม่ หรือเมื่อมีการเปลี่ยนตาราง: รัน `npx knex migrate:latest` ในโฟลเดอร์ของบริการนั้น (booking-service, repair-service, payment-service, user-service, catalog-service)
-- ค่าที่ปรับได้ (booking-service): จำนวนคิวต่อช่อง `BOOKING_SLOT_CAPACITY`, ช่วงเวลารับจอง `BOOKING_SLOT_TIMES`, จองล่วงหน้าได้กี่วัน `BOOKING_MAX_DAYS_AHEAD`
+- ค่าที่ปรับได้ (booking-service): บริการตั้งต้นของคำขอ `REQUEST_DIAGNOSIS_SERVICE_ID`, คำขอที่เปิดได้ต่อลูกค้า `REQUEST_MAX_OPEN_PER_CUSTOMER`, อายุคำขอก่อนปิดอัตโนมัติ `REQUEST_EXPIRY_DAYS`
 - ตาราง/คอลัมน์ของระบบมัดจำที่ถอดออกแล้ว (`deposits`, `deposit_audit_logs`, `bookings.deposit_due_at`) ยังอยู่ในฐานข้อมูลแต่ไม่มีโค้ดใช้ เพราะ migration รันไปแล้ว ถ้าจะลบให้ทำเป็น migration ใหม่

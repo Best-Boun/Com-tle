@@ -345,20 +345,35 @@ export const catalog = {
     })
 };
 
-// ---------------------------------------------------------------- bookings (mirrors booking-service)
-function slotStarted(iso) {
-    return new Date(iso).getTime() <= Date.now();
+// ---------------------------------------------------------------- repair requests (mirrors booking-service)
+const DEVICE_TYPES = ["NOTEBOOK", "DESKTOP", "ALL_IN_ONE", "OTHER"];
+const SYMPTOM_GROUPS = [
+    "WONT_POWER_ON", "DISPLAY", "SLOW_OR_FREEZING", "BATTERY_OR_CHARGING", "KEYBOARD_TOUCHPAD_PORTS",
+    "OVERHEATING_OR_NOISE", "LIQUID_OR_DROP_DAMAGE", "SOFTWARE_OR_VIRUS", "DATA_RECOVERY", "OTHER"
+];
+const MAX_OPEN_REQUESTS = 5;
+// Work orders keep the walk-in form's device text; the symptom group goes in front of the symptom.
+const DEVICE_TYPE_FOR_REPAIR = { NOTEBOOK: "โน้ตบุ๊ก", DESKTOP: "PC", ALL_IN_ONE: "All-in-One", OTHER: "อื่น ๆ" };
+const SYMPTOM_GROUP_LABELS = {
+    WONT_POWER_ON: "เปิดไม่ติด / ดับเอง", DISPLAY: "จอไม่แสดงผล / จอมีปัญหา", SLOW_OR_FREEZING: "ช้า ค้าง รีสตาร์ทเอง",
+    BATTERY_OR_CHARGING: "แบตเตอรี่ / ชาร์จไม่เข้า", KEYBOARD_TOUCHPAD_PORTS: "คีย์บอร์ด ทัชแพด พอร์ต", OVERHEATING_OR_NOISE: "ร้อนผิดปกติ / พัดลมดัง",
+    LIQUID_OR_DROP_DAMAGE: "โดนน้ำ / ตกหล่น", SOFTWARE_OR_VIRUS: "ระบบ โปรแกรม ไวรัส", DATA_RECOVERY: "กู้ข้อมูล", OTHER: "อื่น ๆ / ไม่แน่ใจ"
+};
+const OPEN_BOOKING = ["PENDING", "CONFIRMED"];
+
+function phoneDigits(value) {
+    return String(value || "").replace(/[\s\-().]/g, "").replace(/^\+66/, "0");
 }
 
+/** Old appointment bookings keep their date and time; new requests have none. */
 function presentBooking(b) {
-    const local = new Date(new Date(b.scheduled_at).getTime() + 7 * 3600 * 1000).toISOString();
-    return {
-        ...b,
-        appointment_date: local.slice(0, 10),
-        appointment_time: local.slice(11, 16),
-        timezone: SHOP.timezone,
-        customer_name: userName(b.customer_id)
-    };
+    const shown = { ...b, timezone: SHOP.timezone, customer_name: userName(b.customer_id) };
+    if (b.scheduled_at) {
+        const local = new Date(new Date(b.scheduled_at).getTime() + 7 * 3600 * 1000).toISOString();
+        shown.appointment_date = local.slice(0, 10);
+        shown.appointment_time = local.slice(11, 16);
+    }
+    return shown;
 }
 
 function bookingHistory(bookingId) {
@@ -369,89 +384,75 @@ function bookingHistory(bookingId) {
 }
 
 function changeBooking(b, to, user, { reason = null, changes = {} } = {}) {
-    const allowed = { PENDING: ["CONFIRMED", "CANCELLED", "NO_SHOW"], CONFIRMED: ["COMPLETED", "CANCELLED", "NO_SHOW"], COMPLETED: [], CANCELLED: [], NO_SHOW: [] };
-    if (!allowed[b.status].includes(to)) {
-        throw bad(`เปลี่ยนสถานะจาก ${b.status} เป็น ${to} ไม่ได้`, `Booking cannot change from ${b.status} to ${to}`, 409);
+    if (!OPEN_BOOKING.includes(b.status) || !["COMPLETED", "CANCELLED", "EXPIRED"].includes(to)) {
+        throw bad(`เปลี่ยนสถานะจาก ${b.status} เป็น ${to} ไม่ได้`, `Repair request cannot change from ${b.status} to ${to}`, 409);
     }
     getDb().bookingHistory.push({ history_id: newId(), booking_id: b.booking_id, old_status: b.status, new_status: to, changed_by: user.user_id, reason, created_at: now() });
     Object.assign(b, changes, { status: to, updated_at: now() });
 }
 
-const OPEN_BOOKING = ["PENDING", "CONFIRMED"];
-
-/** For the shop: how many times this customer did not come. */
-function withNoShowCount(b) {
-    const count = getDb().bookings.filter((x) => x.customer_id === b.customer_id && x.status === "NO_SHOW").length;
-    return { ...b, customer_no_show_count: count };
-}
-
-function loadOpenBooking(bookingId) {
-    const b = getDb().bookings.find((x) => x.booking_id === bookingId);
-    if (!b) throw bad("ไม่พบการจอง", "Booking not found", 404);
-    if (!OPEN_BOOKING.includes(b.status)) throw bad("การจองนี้ปิดไปแล้ว", "This booking is no longer open", 409);
-    return b;
-}
-
 function loadBooking(bookingId, user) {
     const b = getDb().bookings.find((x) => x.booking_id === bookingId);
-    if (!b || (!has(user, "ADMIN") && b.customer_id !== user.user_id)) throw bad("ไม่พบการจอง", "Booking not found", 404);
+    if (!b || (!has(user, "ADMIN") && b.customer_id !== user.user_id)) throw bad("ไม่พบคำขอแจ้งซ่อม", "Repair request not found", 404);
     return b;
 }
+
+function matchesSearch(b, search) {
+    const text = search.trim().toUpperCase();
+    if (/^(RQ|BK)-/.test(text)) return b.booking_number.toUpperCase().startsWith(text);
+    const digits = text.replace(/\D/g, "");
+    return Boolean(digits) && phoneDigits(b.contact_phone).includes(digits);
+}
+
+const newestFirst = (a, b) => b.created_at.localeCompare(a.created_at);
 
 export const bookings = {
     config: SHOP,
 
-    availability: handler(async (date) => {
+    options: handler(async () => {
         requireRole("CUSTOMER", "ADMIN");
-        const counts = {};
-        for (const b of getDb().bookings) {
-            if (!ACTIVE_BOOKING.includes(b.status)) continue;
-            const p = presentBooking(b);
-            if (p.appointment_date === date) counts[p.appointment_time] = (counts[p.appointment_time] || 0) + 1;
-        }
-        const slots = SHOP.slotTimes.map((time) => {
-            const booked = counts[time] || 0;
-            const open = !slotStarted(bangkokToIso(date, time));
-            const remaining = open ? Math.max(0, SHOP.slotCapacity - booked) : 0;
-            return { time, capacity: SHOP.slotCapacity, booked, remaining, available: remaining > 0 };
-        });
-        return respond({ date, timezone: SHOP.timezone, slots }, 120);
+        return respond({ device_types: DEVICE_TYPES, symptom_groups: SYMPTOM_GROUPS }, 60);
     }),
 
+    /** "แจ้งซ่อมล่วงหน้า": device + symptom group + contact, no time slot. */
     create: handler(async (input) => {
         const user = requireRole("CUSTOMER");
         const db = getDb();
-        const service = db.services.find((s) => s.service_id === input.service_id);
+        if (!DEVICE_TYPES.includes(input.device_type)) throw bad("เลือกประเภทเครื่อง", "Choose a device type");
+        if (!SYMPTOM_GROUPS.includes(input.symptom_group)) throw bad("เลือกกลุ่มอาการ", "Choose what kind of problem it is");
+        if (!input.reported_symptom?.trim()) throw bad("เล่าอาการที่พบ", "Describe the problem");
+        if (!input.contact_name?.trim()) throw bad("กรอกชื่อผู้ติดต่อ", "Contact name is required");
+        const phone = phoneDigits(input.contact_phone);
+        if (!/^0\d{8,9}$/.test(phone)) throw bad("เบอร์โทรไม่ถูกต้อง เช่น 0812345678", "Enter a Thai phone number, e.g. 0812345678");
+        const open = db.bookings.filter((b) => b.customer_id === user.user_id && OPEN_BOOKING.includes(b.status)).length;
+        if (open >= MAX_OPEN_REQUESTS) {
+            throw bad(`คุณมีคำขอที่ยังไม่ได้นำเครื่องมา ${open} รายการแล้ว นำเครื่องมาหรือยกเลิกก่อน`, `You already have ${open} open repair requests`, 409);
+        }
+        const service = db.services.find((x) => x.service_id === (input.service_id || "svc-diag"));
         const cat = service && db.categories.find((c) => c.category_id === service.category_id);
-        if (!service || !service.is_active || !cat?.is_active) throw bad("บริการนี้ไม่เปิดให้จองแล้ว", "Selected service is not available");
-        if (!SHOP.slotTimes.includes(input.appointment_time)) throw bad("เวลานี้ไม่ใช่ช่วงที่รับจอง", "Selected time is not an available booking slot");
-        if (input.appointment_date > bangkokDate(SHOP.maxDaysAhead)) throw bad(`จองล่วงหน้าได้ไม่เกิน ${SHOP.maxDaysAhead} วัน`, `Bookings can be made at most ${SHOP.maxDaysAhead} days ahead`);
-        const scheduledAt = bangkokToIso(input.appointment_date, input.appointment_time);
-        if (slotStarted(scheduledAt)) throw bad("เวลานี้ผ่านไปแล้ว", "Selected time has already passed");
-        if (!input.device_type?.trim() || !input.reported_symptom?.trim()) throw bad("กรอกประเภทเครื่องและอาการให้ครบ", "Device type and symptom are required");
-        const taken = db.bookings.filter((b) => b.scheduled_at === scheduledAt && ACTIVE_BOOKING.includes(b.status)).length;
-        if (taken >= SHOP.slotCapacity) throw bad("ช่วงเวลานี้เต็มแล้ว กรุณาเลือกเวลาอื่น", "Selected time slot is fully booked", 409);
+        if (!service || !service.is_active || !cat?.is_active) throw bad("บริการนี้ไม่เปิดให้บริการแล้ว", "Selected service is not available");
 
         const booking = {
             booking_id: newId(),
-            booking_number: `BK-${input.appointment_date.replaceAll("-", "")}-${shortCode()}`,
+            booking_number: `RQ-${bangkokDate(0).replaceAll("-", "")}-${shortCode()}`,
             customer_id: user.user_id,
+            contact_name: input.contact_name.trim(),
+            contact_phone: phone,
             service_id: service.service_id,
             service_code: service.service_code,
             service_name: service.service_name,
             service_starting_price: service.starting_price,
             service_currency: service.currency,
-            device_type: input.device_type.trim(),
+            device_type: input.device_type,
             brand: input.brand?.trim() || null,
             model: input.model?.trim() || null,
             serial_number: input.serial_number?.trim() || null,
+            symptom_group: input.symptom_group,
             reported_symptom: input.reported_symptom.trim(),
-            scheduled_at: scheduledAt,
-            // Confirmed straight away, like Booking-Service: capacity was just checked.
-            status: "CONFIRMED",
+            scheduled_at: null,
+            status: "PENDING",
             work_order_id: null,
             technician_id: null,
-            technician_claimed_at: null,
             cancelled_at: null,
             cancelled_by: null,
             cancellation_reason: null,
@@ -459,7 +460,7 @@ export const bookings = {
             updated_at: now()
         };
         db.bookings.push(booking);
-        db.bookingHistory.push({ history_id: newId(), booking_id: booking.booking_id, old_status: null, new_status: "CONFIRMED", changed_by: user.user_id, reason: null, created_at: now() });
+        db.bookingHistory.push({ history_id: newId(), booking_id: booking.booking_id, old_status: null, new_status: "PENDING", changed_by: user.user_id, reason: null, created_at: now() });
         return respond(presentBooking(booking), 350);
     }),
 
@@ -467,78 +468,30 @@ export const bookings = {
         const user = requireRole("CUSTOMER");
         let items = getDb().bookings.filter((b) => b.customer_id === user.user_id);
         if (status) items = items.filter((b) => b.status === status);
-        items.sort((a, b) => b.scheduled_at.localeCompare(a.scheduled_at));
-        return respond(items.map(presentBooking));
+        return respond(items.sort(newestFirst).map(presentBooking));
     }),
 
-    listAll: handler(async ({ status, date } = {}) => {
+    /** The shop: newest first; search = request number (RQ-...) or phone. */
+    listAll: handler(async ({ status, date, search } = {}) => {
         requireRole("ADMIN");
         let items = getDb().bookings.map(presentBooking);
         if (status) items = items.filter((b) => b.status === status);
-        if (date) items = items.filter((b) => b.appointment_date === date);
-        items.sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
-        return respond(items.map(withNoShowCount));
+        if (date) items = items.filter((b) => new Date(new Date(b.created_at).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10) === date);
+        if (search?.trim()) items = items.filter((b) => matchesSearch(b, search));
+        return respond(items.sort(newestFirst));
     }),
 
     get: handler(async (bookingId) => {
         const user = requireRole("CUSTOMER", "ADMIN");
         const b = loadBooking(bookingId, user);
-        const shown = { ...presentBooking(b), status_history: bookingHistory(bookingId) };
-        return respond(has(user, "ADMIN") ? withNoShowCount(shown) : shown);
+        return respond({ ...presentBooking(b), status_history: bookingHistory(bookingId) });
     }),
 
-    /** Open bookings today and the next days, earliest first, for technicians. */
-    queue: handler(async ({ days = 2 } = {}) => {
-        requireRole("TECHNICIAN", "ADMIN");
-        const from = bangkokDate(0);
-        const to = bangkokDate(days - 1);
-        const items = getDb().bookings
-            .map(presentBooking)
-            .filter((b) => OPEN_BOOKING.includes(b.status) && b.appointment_date >= from && b.appointment_date <= to)
-            .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
-        return respond(items);
-    }),
-
-    claim: handler(async (bookingId) => {
-        const user = requireRole("TECHNICIAN");
-        const b = loadOpenBooking(bookingId);
-        if (b.technician_id && b.technician_id !== user.user_id) throw bad("ช่างคนอื่นรับงานนี้ไปแล้ว", "Another technician has already taken this job", 409);
-        if (!b.technician_id) Object.assign(b, { technician_id: user.user_id, technician_claimed_at: now(), updated_at: now() });
-        return respond(presentBooking(b));
-    }),
-
-    release: handler(async (bookingId) => {
-        const user = requireRole("TECHNICIAN", "ADMIN");
-        const b = loadOpenBooking(bookingId);
-        if (b.technician_id && !has(user, "ADMIN") && b.technician_id !== user.user_id) {
-            throw bad("คืนงานได้เฉพาะช่างที่รับงานไว้", "Only the technician who took this job can give it back", 403);
-        }
-        Object.assign(b, { technician_id: null, technician_claimed_at: null, updated_at: now() });
-        return respond(presentBooking(b));
-    }),
-
-    /** The customer did not come: only after the appointment time. */
-    markNoShow: handler(async (bookingId, reason) => {
-        const user = requireRole("ADMIN");
-        const b = loadBooking(bookingId, user);
-        if (!slotStarted(b.scheduled_at)) throw bad("บันทึกว่าไม่มาตามนัดได้หลังเลยเวลานัดแล้วเท่านั้น", "A no-show can only be recorded after the appointment time", 409);
-        changeBooking(b, "NO_SHOW", user, { reason: reason?.trim() || null });
-        return respond(withNoShowCount(presentBooking(b)));
-    }),
-
-    confirm: handler(async (bookingId) => {
-        const user = requireRole("ADMIN");
-        const b = loadBooking(bookingId, user);
-        changeBooking(b, "CONFIRMED", user);
-        return respond(presentBooking(b));
-    }),
-
+    /** The customer any time while open; the shop with a reason. */
     cancel: handler(async (bookingId, reason) => {
         const user = requireRole("CUSTOMER", "ADMIN");
         const b = loadBooking(bookingId, user);
-        const admin = has(user, "ADMIN");
-        if (!admin && slotStarted(b.scheduled_at)) throw bad("เลยเวลานัดแล้ว กรุณาติดต่อร้าน", "Appointment time has passed, please contact the shop", 409);
-        if (admin && !reason?.trim()) throw bad("กรุณาระบุเหตุผลการยกเลิก", "A cancellation reason is required");
+        if (has(user, "ADMIN") && !reason?.trim()) throw bad("กรุณาระบุเหตุผลการยกเลิก", "A cancellation reason is required");
         changeBooking(b, "CANCELLED", user, {
             reason: reason?.trim() || null,
             changes: { cancelled_at: now(), cancelled_by: user.user_id, cancellation_reason: reason?.trim() || null }
@@ -546,35 +499,29 @@ export const bookings = {
         return respond(presentBooking(b));
     }),
 
-    /** Customer arrived: create the Work Order (1 booking = 1 work order) and complete the booking. */
+    /** The customer brought the device: create the Work Order (1 request = 1 work order). */
     checkIn: handler(async (bookingId, { accessories, intake_terms_acknowledged } = {}) => {
         const user = requireRole("ADMIN");
         const b = loadBooking(bookingId, user);
         if (!intake_terms_acknowledged) throw bad("ลูกค้าต้องรับทราบเงื่อนไขการรับเครื่อง", "Customer intake terms acknowledgement is required");
-        if (!OPEN_BOOKING.includes(b.status)) throw bad("การจองนี้ปิดไปแล้ว", "This booking is no longer open", 409);
-        if (b.work_order_id) throw bad("การจองนี้มีใบงานแล้ว", "This booking already has a work order", 409);
+        if (!OPEN_BOOKING.includes(b.status)) throw bad("คำขอนี้ปิดไปแล้ว", "This repair request is no longer open", 409);
+        if (b.work_order_id) throw bad("คำขอนี้มีใบงานแล้ว", "This repair request already has a work order", 409);
         const wo = createWorkOrder({
             source: "BOOKING",
             booking_id: b.booking_id,
             customer_id: b.customer_id,
             customer_name: userName(b.customer_id),
-            customer_phone: getDb().users.find((u) => u.user_id === b.customer_id)?.phone || null,
+            customer_phone: b.contact_phone || getDb().users.find((u) => u.user_id === b.customer_id)?.phone || null,
             service_id: b.service_id,
             service_name: b.service_name,
-            device_type: b.device_type,
+            device_type: DEVICE_TYPE_FOR_REPAIR[b.device_type] || b.device_type,
             brand: b.brand,
             model: b.model,
             serial_number: b.serial_number,
-            reported_symptom: b.reported_symptom,
+            reported_symptom: SYMPTOM_GROUP_LABELS[b.symptom_group] ? `[${SYMPTOM_GROUP_LABELS[b.symptom_group]}] ${b.reported_symptom}` : b.reported_symptom,
             accessories: accessories?.trim() || null,
             intake_terms_acknowledged_at: now()
-        }, user, "รับเครื่องจากการจอง " + b.booking_number);
-        // The technician who took this booking gets the work order straight away.
-        const tech = b.technician_id && getDb().users.find((u) => u.user_id === b.technician_id && has(u, "TECHNICIAN"));
-        if (tech) {
-            wo.technician_id = tech.user_id;
-            getDb().workOrderHistory.push({ id: newId(), work_order_id: wo.work_order_id, old_status: wo.status, new_status: wo.status, changed_by: user.user_id, note: `มอบหมายให้ ${tech.full_name} (รับงานจากคิว)`, created_at: now() });
-        }
+        }, user, "รับเครื่องจากคำขอ " + b.booking_number);
         changeBooking(b, "COMPLETED", user, { changes: { work_order_id: wo.work_order_id } });
         return respond({ booking: presentBooking(b), work_order: wo }, 400);
     })
@@ -1188,12 +1135,15 @@ export const dashboard = {
         requireRole("ADMIN");
         const db = getDb();
         const today = bangkokDate(0);
-        const bookingsToday = db.bookings.map(presentBooking).filter((b) => b.appointment_date === today && ACTIVE_BOOKING.includes(b.status));
+        const bangkokDay = (iso) => new Date(new Date(iso).getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+        const bookingsToday = db.bookings.filter((b) => bangkokDay(b.created_at) === today);
+        const waitingRequests = db.bookings.filter((b) => OPEN_BOOKING.includes(b.status));
         const wos = db.workOrders.map((w) => presentWo(w));
         return respond({
             today,
             bookings_today: bookingsToday.length,
-            bookings_overdue: db.bookings.filter((b) => OPEN_BOOKING.includes(b.status) && slotStarted(b.scheduled_at)).length,
+            // Requests still waiting for the device after 7 days.
+            bookings_overdue: waitingRequests.filter((b) => Date.now() - new Date(b.created_at).getTime() > 7 * 86400000).length,
             open_work_orders: wos.filter((w) => OPEN_WO.includes(w.status)).length,
             waiting_approval: wos.filter((w) => w.status === "WAITING_APPROVAL").length,
             drafts_to_price: db.quotations.filter((q) => q.status === "DRAFT").length,
@@ -1201,7 +1151,7 @@ export const dashboard = {
             unassigned: wos.filter((w) => OPEN_WO.includes(w.status) && !w.technician_id).length,
             low_stock: db.parts.filter((p) => p.stock <= p.reorder_level).map((p) => ({ part_id: p.part_id, name: p.name, stock: p.stock, reorder_level: p.reorder_level })),
             outstanding_total: wos.filter((w) => w.status !== "CANCELLED").reduce((s, w) => s + w.payment.balance, 0),
-            upcoming: db.bookings.map(presentBooking).filter((b) => ["PENDING", "CONFIRMED"].includes(b.status) && !slotStarted(b.scheduled_at)).sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at)).slice(0, 6),
+            upcoming: waitingRequests.sort(newestFirst).slice(0, 6).map(presentBooking),
             work_by_status: OPEN_WO.map((s) => ({ status: s, count: wos.filter((w) => w.status === s).length }))
         });
     })
