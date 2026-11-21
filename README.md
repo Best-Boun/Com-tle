@@ -407,9 +407,9 @@ npm run dev          # http://localhost:5173
 
 | ชื่อ | รหัสนักศึกษา | บทบาท | ส่วนที่รับผิดชอบ | GitHub |
 |---|---|---|---|---|
-| นาย ศิวากร แทนทรัพย์ (Siwakorn Thaensap) | 67128056 | (รอใส่) | Booking Service, Catalog Service | [Siwakorn1-ai](https://github.com/Siwakorn1-ai) |
-| นาย สุรวุฒิ บุญยู้ (Surawut Boonyu) | 67144643 | (รอใส่) | Repair Service, Inventory Service | [Best-Boun](https://github.com/Best-Boun) |
-| นาย รัชภูมิ ธรรมประชา (Rachapoom Thumpracha) | 67159224 | (รอใส่) | User Service, Payment Service | [rachapoomthu-max](https://github.com/rachapoomthu-max) |
+| นาย ศิวากร แทนทรัพย์ (Siwakorn Thaensap) | 67128056 | Tester & Developer | Booking Service, Catalog Service | [Siwakorn1-ai](https://github.com/Siwakorn1-ai) |
+| นาย สุรวุฒิ บุญยู้ (Surawut Boonyu) | 67144643 | Lead Developer (หัวหน้าทีม) | Repair Service, Inventory Service | [Best-Boun](https://github.com/Best-Boun) |
+| นาย รัชภูมิ ธรรมประชา (Rachapoom Thumpracha) | 67159224 | System Analyst & Developer | User Service, Payment Service | [rachapoomthu-max](https://github.com/rachapoomthu-max) |
 
 อาจารย์ผู้สอน: อาจารย์ ทินภัทร บริรักษ์ (Thinnaphat Borirak) · CSI400 · Department of Computer Science and Software Development Innovation, Sripatum University (SPU) · thinnaphat.bo@spu.ac.th
 
