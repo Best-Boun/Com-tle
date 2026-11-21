@@ -34,7 +34,7 @@ export const MEMBERS = [
         name: "นาย ศิวากร แทนทรัพย์",
         name_en: "Siwakorn Thaensap",
         student_id: "67128056",
-        role: "",       // e.g. "System Analyst & Developer"
+        role: "Tester & Developer",
         module: "Booking Service & Catalog Service",
         services: ["Booking Service", "Catalog Service"],
         github: "Siwakorn1-ai",
@@ -45,18 +45,18 @@ export const MEMBERS = [
         name: "นาย สุรวุฒิ บุญยู้",
         name_en: "Surawut Boonyu",
         student_id: "67144643",
-        role: "",       // e.g. "System Analyst & Developer"
+        role: "Lead Developer",
         module: "Repair Service & Inventory Service",
         services: ["Repair Service", "Inventory Service"],
         github: "Best-Boun",
         photo: "",
-        lead: false
+        lead: true
     },
     {
         name: "นาย รัชภูมิ ธรรมประชา",
         name_en: "Rachapoom Thumpracha",
         student_id: "67159224",
-        role: "",       // e.g. "System Analyst & Developer"
+        role: "System Analyst & Developer",
         module: "User Service & Payment Service",
         services: ["User Service", "Payment Service"],
         github: "rachapoomthu-max",
