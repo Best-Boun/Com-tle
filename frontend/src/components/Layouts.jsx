@@ -72,7 +72,8 @@ export function PublicLayout() {
                     <Link to="/" className="brand"><BrandMark />SmartFix</Link>
                     <nav className={`topnav ${open ? "open" : ""}`} aria-label={L("เมนูหลัก", "Main")}>
                         <NavLink to="/services">{L("บริการและราคา", "Services & prices")}</NavLink>
-                        <NavLink to="/team">{L("ทีมผู้พัฒนา", "Team")}</NavLink>
+                        {/* Customers have a full menu already; they reach the team page from the footer. */}
+                        {!isCustomer && <NavLink to="/team">{L("ทีมผู้พัฒนา", "Team")}</NavLink>}
                         {isCustomer && (
                             <>
                                 <NavLink to="/book">{L("แจ้งซ่อม", "Request a repair")}</NavLink>
