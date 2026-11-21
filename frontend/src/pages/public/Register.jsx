@@ -5,6 +5,7 @@ import { useAuth } from "../../auth/AuthProvider.jsx";
 import { api } from "../../api/index.js";
 import { errorText } from "../../utils/errors.js";
 import { TextField, useToast } from "../../components/ui.jsx";
+import AuthShell from "../../components/AuthShell.jsx";
 
 export default function Register() {
     const { L, t, lang } = useI18n();
