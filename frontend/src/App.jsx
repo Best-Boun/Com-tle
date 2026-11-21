@@ -4,6 +4,7 @@ import RequireRole from "./auth/RequireRole.jsx";
 
 import Home from "./pages/public/Home.jsx";
 import Services from "./pages/public/Services.jsx";
+import Team from "./pages/public/Team.jsx";
 import Login from "./pages/public/Login.jsx";
 import Register from "./pages/public/Register.jsx";
 import NotFound from "./pages/public/NotFound.jsx";
@@ -41,6 +42,7 @@ export default function App() {
             <Route element={<PublicLayout />}>
                 <Route index element={<Home />} />
                 <Route path="services" element={<Services />} />
+                <Route path="team" element={<Team />} />
                 <Route path="login" element={<Login />} />
                 <Route path="register" element={<Register />} />
                 <Route path="book" element={customer(<BookService />)} />

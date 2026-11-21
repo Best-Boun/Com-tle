@@ -2,6 +2,8 @@
   "name": "smartfix-frontend",
   "private": true,
   "version": "1.0.0",
+  "license": "MIT",
+  "author": "SmartFix development team",
   "type": "module",
   "scripts": {
     "dev": "vite",
