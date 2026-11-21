@@ -283,8 +283,13 @@ Example response:
 ### `PUT /admin/users/:userId/roles/:roleCode`
 
 Requires `user.role.manage`. The path role code may be `CUSTOMER` or
-`TECHNICIAN`; `ADMIN` and unknown role codes are rejected. The authenticated
-administrator is recorded in `assigned_by`. Duplicate assignments return 409.
+`TECHNICIAN`; `ADMIN` and unknown role codes are rejected. A user has exactly
+one role, so assigning a role **replaces** the current one (CUSTOMER <->
+TECHNICIAN) in one transaction; the audit record lists the replaced role codes
+(`replaced_role_codes`). The authenticated administrator is recorded in
+`assigned_by`. Assigning the role the user already has returns 409, an ADMIN
+account's role cannot be changed (409), and administrators cannot change their
+own role (403).
 
 Example:
 
@@ -314,7 +319,9 @@ user's final role returns 409. Role mutations lock the target user in a
 transaction, preventing concurrent operations from bypassing the final-role
 check. Users and accounts are never hard-deleted by these APIs.
 On success the response data contains the target `user_id` and removed
-`role_code`.
+`role_code`. Because every user has exactly one role, that role is always the
+final one, so this route returns 409 in practice; change a role with `PUT`
+instead.
 
 Example:
 

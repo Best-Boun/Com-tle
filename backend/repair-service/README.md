@@ -1,8 +1,10 @@
 # Repair Service
 
-Repair-Service owns work orders, repair workflow state, and the parts catalog.
-Booking check-in creates one work order per booking; retrying the check-in
-returns the existing ticket.
+Repair-Service owns work orders, repair workflow state, the technician queue,
+warranty and warranty claims, customer notifications, and the parts catalog.
+Checking in a repair request (Booking-Service) creates one work order per
+request; retrying the check-in returns the existing ticket. Walk-ins are
+created here directly.
 
 ## Setup
 
@@ -28,6 +30,11 @@ Routes are mounted at the service root; the API Gateway exposes them under
 - `GET /work-orders/:workOrderId` — retrieve a work order and its status history
   when the caller owns it or has assigned/admin access.
 - `GET /work-orders/assigned` — list the signed-in technician's assigned work.
+- `GET /work-orders/queue` — TECHNICIAN or ADMIN: received work orders that no
+  technician holds yet, oldest first.
+- `POST /work-orders/:workOrderId/claim` — a TECHNICIAN takes a job from the
+  queue. First come, first served under the work order's row lock: 409 when
+  someone else already holds it or it has moved on from received.
 - `GET /work-orders` — admin work-order list with optional `status` and `search`.
 - `POST /work-orders/:workOrderId/assign` — ADMIN assigns or reassigns an active
   work order using `{ "technician_user_id": "<user UUID>" }`. The active
@@ -55,9 +62,21 @@ Routes are mounted at the service root; the API Gateway exposes them under
   `customer_id`.
 - Work orders ready for pick-up carry `pickup` (free until `ready_at` +
   `FREE_STORAGE_DAYS`, default 7, then `overdue`).
-- `POST /work-orders/:workOrderId/handover` — ADMIN hands over a tested device.
-  Repair-Service checks the live Payment-Service balance using the caller's
-  authorization token; an outstanding amount requires an exception reason.
+- `POST /work-orders/:workOrderId/handover` — ADMIN hands over a tested device
+  (or a declined one) with `{ terms_acknowledged: true, exceptionReason? }`.
+  Repair-Service brings the bill up to date, then checks the live
+  Payment-Service balance using the caller's authorization token; an
+  outstanding amount requires an exception reason. Nothing to bill (a free
+  warranty claim) skips Payment-Service.
+- Warranty: a work order handed over as repaired carries
+  `warranty: { days, starts_at, until, active, days_left }`, counted from
+  handover for `WARRANTY_DAYS` (default 90). Declined and cancelled jobs have none.
+- `POST /work-orders/:workOrderId/warranty-claims` — ADMIN, while the warranty
+  is active: `{ reported_symptom, accessories?, intake_terms_acknowledged: true }`
+  opens a claim work order linked by `parent_work_order_id` (same customer and
+  device). One open claim per original. Every option quoted on a claim,
+  "no repair" included, is 0 THB. Work orders show `warranty_parent` and
+  `warranty_claims` to link both ways.
 - `POST /work-orders/:workOrderId/cancel` — ADMIN cancels an open ticket and
   records returned stock.
 - `GET/POST /parts`, `GET /parts/movements`, and `POST /parts/:partId/receive`
@@ -67,9 +86,10 @@ Routes are mounted at the service root; the API Gateway exposes them under
 The Inventory Service is still a skeleton; stock is persisted in the
 Repair-Service database (`repair_parts_inventory` and
 `repair_stock_movements`) so parts can be used without demo data. Payments stay
-in Payment-Service. The frontend registers or updates a bill from approved
-quotations before recording payment or handover; handover independently
-verifies the balance server-side.
+in Payment-Service. Before recording a payment the frontend asks
+Repair-Service to register the bill (`POST /work-orders/:id/bill`), so the
+browser never sends the amount; handover updates the bill and verifies the
+balance server-side on its own.
 
 ## Customer notifications (task 13)
 
