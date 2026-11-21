@@ -81,5 +81,6 @@ The API Gateway always starts. Service ports:
 ## Important implementation decisions
 
 - Repair Service owns repair-part inventory and stock movements. Inventory Service remains health-only; see [inventory-service/README.md](./inventory-service/README.md).
-- Legacy booking-deposit and deposit-audit migrations have been removed. Current booking statuses do not include `AWAITING_DEPOSIT`.
+- The booking deposit was removed, but its migrations (`booking-service/migrations/20261118000001_booking_deposit_hold.js`, `payment-service/migrations/20261118000001_create_deposits.js`, `payment-service/migrations/20261118000002_create_deposit_audit_logs.js`) stay: they already ran on the shared database, and knex refuses to migrate when an applied file is missing. Their tables and columns are unused. `20261119000101_repair_requests.js` turned any leftover `AWAITING_DEPOSIT` booking into `CANCELLED`; to drop the deposit tables, add a new migration instead of deleting these files.
+- Booking Service now holds repair requests ("แจ้งซ่อมล่วงหน้า", no time slots); Repair Service owns the technician queue, warranty and customer notifications. See the root [README](../README.md) for the full flow.
 - Repair intake and handover acknowledgement timestamps are stored in `work_orders`.
