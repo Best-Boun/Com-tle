@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { useI18n } from "../i18n/I18nProvider.jsx";
+import { deviceTypeText, itemText, noteText, optionText } from "../utils/serverText.js";
 import { WO_STAGES } from "../i18n/dictionary.js";
 import { Money, StatusBadge, TextField } from "./ui.jsx";
 import "../pages/customer/customer.css";
 
 /** Stage bar for a work order (customer-friendly). */
 export function RepairProgress({ status, handedOver, declined = false }) {
-    const { t } = useI18n();
+    const { t, lang } = useI18n();
     if (status === "CANCELLED") return null;
     // "No repair" skips the repair stages: inspected, then straight to pick-up.
     const stages = declined ? WO_STAGES.filter((s) => !["APPROVED", "REPAIRING", "TESTING"].includes(s)) : WO_STAGES;
@@ -27,7 +28,7 @@ export function RepairProgress({ status, handedOver, declined = false }) {
 
 /** One quotation revision, rendered like a printed document. Revisions are never overwritten. */
 export function QuotationCard({ quotation, superseded = false, children }) {
-    const { L, t, fmt } = useI18n();
+    const { L, t, fmt, lang } = useI18n();
     const q = quotation;
     return (
         <article className={`quote ${q.status === "SENT" ? "is-sent" : ""} ${superseded ? "is-superseded" : ""}`}>
@@ -58,7 +59,7 @@ export function QuotationCard({ quotation, superseded = false, children }) {
 }
 
 function ItemsTable({ items, total, draft = false }) {
-    const { L, t } = useI18n();
+    const { L, t, lang } = useI18n();
     return (
         <div className="table-wrap" style={{ border: 0 }}>
             <table className="table">
@@ -74,7 +75,7 @@ function ItemsTable({ items, total, draft = false }) {
                     {items.map((i) => (
                         <tr key={i.item_id}>
                             <td>
-                                {i.description}
+                                {itemText(i.description, lang)}
                                 <span className="faint small"> · {t(`item.${i.type}`)}</span>
                             </td>
                             <td className="right num">{i.qty}</td>
@@ -99,10 +100,10 @@ export function optionTitle(option, t, lang) {
 }
 
 function OptionBody({ option }) {
-    const { L, t } = useI18n();
+    const { L, t, lang } = useI18n();
     return (
         <>
-            {option.description && <p className="small muted" style={{ margin: 0 }}>{option.kind === "REPAIR" ? option.description : L(option.description, option.kind === "NO_REPAIR" ? "Inspection is free when you repair. If you don't, only the inspection fee is charged." : "The approved repair goes on as agreed, at no extra cost.")}</p>}
+            {option.description && <p className="small muted" style={{ margin: 0 }}>{optionText(option, lang).description}</p>}
             {option.items.length > 0 && option.kind === "REPAIR" && (
                 <ul className="small">
                     {option.items.map((i) => (
@@ -177,7 +178,7 @@ export function OptionPicker({ quotation, busy, onChoose, confirmLabel, noteLabe
 
 /** How long a ready device is kept for free, and whether that time is up. */
 export function PickupNote({ workOrder }) {
-    const { L, fmt } = useI18n();
+    const { L, fmt, lang } = useI18n();
     const p = workOrder.pickup;
     if (!p || workOrder.handed_over_at) return null;
     return p.overdue ? (
@@ -193,7 +194,7 @@ export function PickupNote({ workOrder }) {
 
 /** Balance is computed by the Payment Service from recorded transactions. */
 export function PaymentSummary({ payment }) {
-    const { L } = useI18n();
+    const { L, lang } = useI18n();
     if (payment.unavailable) {
         return (
             <div className="notice warn small" role="status">
@@ -213,15 +214,15 @@ export function PaymentSummary({ payment }) {
 }
 
 export function WoHistory({ history }) {
-    const { L, t, fmt } = useI18n();
+    const { L, t, fmt, lang } = useI18n();
     return (
         <ol className="timeline">
             {history.map((h) => (
                 <li key={h.id}>
-                    <strong>{h.old_status === h.new_status ? (h.note || "—") : t(`status.wo.${h.new_status}`)}</strong>
+                    <strong>{h.old_status === h.new_status ? (noteText(h.note, lang) || "—") : t(`status.wo.${h.new_status}`)}</strong>
                     <div className="faint small">
                         {fmt.dateTime(h.created_at)} · {h.changed_by_name || L("ระบบ", "System")}
-                        {h.old_status !== h.new_status && h.note ? ` · ${h.note}` : ""}
+                        {h.old_status !== h.new_status && h.note ? ` · ${noteText(h.note, lang)}` : ""}
                     </div>
                 </li>
             ))}
@@ -229,6 +230,12 @@ export function WoHistory({ history }) {
     );
 }
 
-export function deviceLabel(x) {
-    return [x.brand, x.model].filter(Boolean).join(" ") || x.device_type;
+/** Brand and model, or the device type in the reader's language when there is neither. */
+export function deviceLabel(x, lang = "th") {
+    return [x.brand, x.model].filter(Boolean).join(" ") || deviceTypeText(x.device_type, lang);
+}
+
+/** "Notebook · Asus · VivoBook" in the reader's language. */
+export function deviceFacts(x, lang = "th") {
+    return [deviceTypeText(x.device_type, lang), x.brand, x.model].filter(Boolean).join(" · ");
 }

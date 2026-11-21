@@ -14,6 +14,7 @@ export const DICT = {
         "status.booking.CANCELLED": "ยกเลิก",
         "status.booking.EXPIRED": "หมดอายุ",
         "status.booking.NO_SHOW": "ไม่มาตามนัด",
+        "status.booking.AWAITING_DEPOSIT": "รอมัดจำ (ระบบเดิม)",
 
         "device.NOTEBOOK": "โน้ตบุ๊ก",
         "device.DESKTOP": "คอมพิวเตอร์ตั้งโต๊ะ (PC)",
@@ -63,6 +64,8 @@ export const DICT = {
         "status.refund.APPROVED": "อนุมัติแล้ว รอโอนคืน",
         "status.refund.COMPLETED": "คืนเงินแล้ว",
         "status.refund.REJECTED": "ปฏิเสธ/ยกเลิก",
+        "status.refund.PROCESSING": "กำลังโอนคืน",
+        "status.refund.FAILED": "โอนคืนไม่สำเร็จ",
 
         "pay.method.CASH": "เงินสด",
         "pay.method.TRANSFER": "โอนเงิน",
@@ -103,6 +106,7 @@ export const DICT = {
         "status.booking.CANCELLED": "Cancelled",
         "status.booking.EXPIRED": "Expired",
         "status.booking.NO_SHOW": "No-show",
+        "status.booking.AWAITING_DEPOSIT": "Awaiting deposit (old system)",
 
         "device.NOTEBOOK": "Notebook",
         "device.DESKTOP": "Desktop PC",
@@ -152,6 +156,8 @@ export const DICT = {
         "status.refund.APPROVED": "Approved, to pay out",
         "status.refund.COMPLETED": "Refunded",
         "status.refund.REJECTED": "Rejected/withdrawn",
+        "status.refund.PROCESSING": "Refund in progress",
+        "status.refund.FAILED": "Refund failed",
 
         "pay.method.CASH": "Cash",
         "pay.method.TRANSFER": "Bank transfer",

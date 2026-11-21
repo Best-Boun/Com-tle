@@ -4,13 +4,13 @@ import { useI18n } from "../../i18n/I18nProvider.jsx";
 import { api } from "../../api/index.js";
 import { useAsync } from "../../utils/useAsync.js";
 import { ErrorNotice, Loading, Money, Stamp, useAction } from "../../components/ui.jsx";
-import { OptionPicker, PaymentSummary, PickupNote, QuotationCard, RepairProgress, WoHistory, deviceLabel } from "../../components/repair.jsx";
+import { OptionPicker, PaymentSummary, PickupNote, QuotationCard, RepairProgress, WoHistory, deviceFacts, deviceLabel } from "../../components/repair.jsx";
 import Checkout from "../../components/Checkout.jsx";
 import { WarrantyNotice } from "../../components/Warranty.jsx";
 
 export default function RepairDetail() {
     const { workOrderId } = useParams();
-    const { L, t, fmt } = useI18n();
+    const { L, t, fmt, lang } = useI18n();
     const wo = useAsync(() => api.repairs.get(workOrderId), [workOrderId]);
     const [paying, setPaying] = useState(false);
     const [run, busy] = useAction();
@@ -43,7 +43,7 @@ export default function RepairDetail() {
                 <div>
                     <p className="faint small">{L("ใบงานซ่อม", "Repair ticket")}{w.booking_number ? ` · ${L("จาก", "from")} ${w.booking_number}` : ""}</p>
                     <h1 className="num">{w.work_order_number}</h1>
-                    <p>{deviceLabel(w)} · {w.service_name}</p>
+                    <p>{deviceLabel(w, lang)} · {w.service_name}</p>
                 </div>
                 <Stamp kind="wo" status={shownStatus} />
             </div>
@@ -121,7 +121,7 @@ export default function RepairDetail() {
                         <h2>{L("รายละเอียดเครื่อง", "Device")}</h2>
                         <dl className="facts">
                             <dt>{L("เครื่อง", "Device")}</dt>
-                            <dd>{[w.device_type, w.brand, w.model].filter(Boolean).join(" · ")}</dd>
+                            <dd>{deviceFacts(w, lang)}</dd>
                             {w.serial_number && (<><dt>Serial</dt><dd>{w.serial_number}</dd></>)}
                             <dt>{L("อาการที่แจ้ง", "Reported")}</dt>
                             <dd>{w.reported_symptom}</dd>

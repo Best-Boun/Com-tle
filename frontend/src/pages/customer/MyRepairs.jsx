@@ -7,7 +7,7 @@ import Ticket from "../../components/Ticket.jsx";
 import { deviceLabel } from "../../components/repair.jsx";
 
 export default function MyRepairs() {
-    const { L, fmt } = useI18n();
+    const { L, fmt, lang } = useI18n();
     const list = useAsync(() => api.repairs.listMine(), []);
 
     return (
@@ -26,7 +26,7 @@ export default function MyRepairs() {
                         key={w.work_order_id}
                         to={`/my/repairs/${w.work_order_id}`}
                         number={w.work_order_number}
-                        title={`${deviceLabel(w)} · ${w.service_name || ""}`}
+                        title={`${deviceLabel(w, lang)} · ${w.service_name || ""}`}
                         meta={[`${L("รับเครื่อง", "Received")} ${fmt.date(w.created_at)}`, w.handed_over_at && L("ส่งมอบแล้ว", "Handed over")]}
                         kind="wo"
                         status={w.handed_over_at ? "HANDED_OVER" : w.status}

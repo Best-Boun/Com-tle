@@ -26,7 +26,7 @@ function nextStep(w, L) {
 }
 
 export default function TechJobs() {
-    const { L, fmt } = useI18n();
+    const { L, fmt, lang } = useI18n();
     const [tab, setTab] = useState("active");
     const list = useAsync(() => api.repairs.listAssigned(), []);
     const queue = useAsync(() => api.repairs.queue(), []);
@@ -72,7 +72,7 @@ export default function TechJobs() {
                         to={`/tech/jobs/${w.work_order_id}`}
                         walkIn={w.source === "WALK_IN"}
                         number={w.work_order_number}
-                        title={`${deviceLabel(w)} · ${w.reported_symptom}`}
+                        title={`${deviceLabel(w, lang)} · ${w.reported_symptom}`}
                         meta={[w.service_name, `${L("อัปเดต", "Updated")} ${fmt.dateTime(w.updated_at)}`]}
                         kind="wo"
                         status={w.status}
