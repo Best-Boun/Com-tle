@@ -72,6 +72,7 @@ export function PublicLayout() {
                     <Link to="/" className="brand"><BrandMark />SmartFix</Link>
                     <nav className={`topnav ${open ? "open" : ""}`} aria-label={L("เมนูหลัก", "Main")}>
                         <NavLink to="/services">{L("บริการและราคา", "Services & prices")}</NavLink>
+                        <NavLink to="/team">{L("ทีมผู้พัฒนา", "Team")}</NavLink>
                         {isCustomer && (
                             <>
                                 <NavLink to="/book">{L("แจ้งซ่อม", "Request a repair")}</NavLink>
@@ -143,7 +144,7 @@ function Footer() {
                     </div>
                 </div>
                 <div className="footer-bottom">
-                    <span>© SmartFix</span>
+                    <span>© 2026 SmartFix development team · <Link to="/team">{L("ทีมผู้พัฒนา", "Team")}</Link> · MIT License</span>
                     <span>
                         {USING_MOCK
                             ? L("ตอนนี้ใช้ข้อมูลตัวอย่าง", "Running on demo data")

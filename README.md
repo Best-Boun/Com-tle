@@ -385,3 +385,19 @@ npm run dev          # http://localhost:5173
 - ค่าที่ปรับได้ (repair-service): ระยะรับประกัน `WARRANTY_DAYS` (ค่าเริ่มต้น 90 วัน นับจากวันส่งมอบ เฉพาะงานที่ซ่อม ไม่รวมงานที่เลือกไม่ซ่อมหรือยกเลิก) ใบงานแสดง `warranty` และ `warranty_parent` / `warranty_claims`
 - ค่าที่ปรับได้ (booking-service): บริการตั้งต้นของคำขอ `REQUEST_DIAGNOSIS_SERVICE_ID`, คำขอที่เปิดได้ต่อลูกค้า `REQUEST_MAX_OPEN_PER_CUSTOMER`, อายุคำขอก่อนปิดอัตโนมัติ `REQUEST_EXPIRY_DAYS` (ค่าเริ่มต้น 30 วัน booking-service ตรวจทุก `REQUEST_EXPIRY_CHECK_MINUTES` นาที แล้วเปลี่ยนคำขอที่ไม่มีใครนำเครื่องมาเป็น EXPIRED)
 - ตาราง/คอลัมน์ของระบบมัดจำที่ถอดออกแล้ว (`deposits`, `deposit_audit_logs`, `bookings.deposit_due_at`) ยังอยู่ในฐานข้อมูลแต่ไม่มีโค้ดใช้ เพราะ migration รันไปแล้ว ถ้าจะลบให้ทำเป็น migration ใหม่
+
+## ผู้พัฒนา / Developers
+
+หน้า `/team` ในเว็บแสดงข้อมูลชุดเดียวกัน แก้ได้ที่ `frontend/src/data/team.js`
+
+| ชื่อ | รหัสนักศึกษา | บทบาท | ส่วนที่รับผิดชอบ | GitHub |
+|---|---|---|---|---|
+| นาย ศิวากร แทนทรัพย์ (Siwakorn Thaensap) | 67128056 | (รอใส่) | (รอใส่) | [Siwakorn1-ai](https://github.com/Siwakorn1-ai) |
+| นาย สุรวุฒิ บุญยู้ (Surawut Boonyu) | 67144643 | (รอใส่) | (รอใส่) | [Best-Boun](https://github.com/Best-Boun) |
+| นาย รัชภูมิ ธรรมประชา (Rachapoom Thumpracha) | 67159224 | (รอใส่) | (รอใส่) | [rachapoomthu-max](https://github.com/rachapoomthu-max) |
+
+อาจารย์ผู้สอน: (รอใส่)
+
+## License
+
+[MIT](LICENSE) © 2026 SmartFix development team
