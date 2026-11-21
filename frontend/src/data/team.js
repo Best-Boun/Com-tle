@@ -38,7 +38,7 @@ export const MEMBERS = [
         module: "Booking Service & Catalog Service",
         services: ["Booking Service", "Catalog Service"],
         github: "Siwakorn1-ai",
-        photo: "",
+        photo: "/team/siwakorn.jpg",
         lead: false
     },
     {
