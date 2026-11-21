@@ -9,17 +9,19 @@
  */
 
 export const COURSE = {
-    code: "",        // e.g. "CSI400"
+    code: "CSI400",
     name: "",        // course name
-    university: "",  // e.g. "มหาวิทยาลัยศรีปทุม (SPU)"
+    university: "Sripatum University (SPU)",
     year: "2026"
 };
 
 export const INSTRUCTOR = {
-    name: "",
+    name: "อาจารย์ ทินภัทร บริรักษ์",
+    name_en: "Thinnaphat Borirak",
     title: "อาจารย์ผู้สอน",
-    department: "",
-    email: "",
+    title_en: "Course instructor",
+    department: "Department of Computer Science and Software Development Innovation",
+    email: "thinnaphat.bo@spu.ac.th",
     photo: ""
 };
 
@@ -33,8 +35,8 @@ export const MEMBERS = [
         name_en: "Siwakorn Thaensap",
         student_id: "67128056",
         role: "",       // e.g. "System Analyst & Developer"
-        module: "",     // e.g. "Repair Request & Warranty"
-        services: [],   // e.g. ["Booking Service", "Warranty"]
+        module: "Booking Service & Catalog Service",
+        services: ["Booking Service", "Catalog Service"],
         github: "Siwakorn1-ai",
         photo: "",
         lead: false
@@ -44,8 +46,8 @@ export const MEMBERS = [
         name_en: "Surawut Boonyu",
         student_id: "67144643",
         role: "",       // e.g. "System Analyst & Developer"
-        module: "",     // e.g. "Repair Request & Warranty"
-        services: [],   // e.g. ["Booking Service", "Warranty"]
+        module: "Repair Service & Inventory Service",
+        services: ["Repair Service", "Inventory Service"],
         github: "Best-Boun",
         photo: "",
         lead: false
@@ -55,8 +57,8 @@ export const MEMBERS = [
         name_en: "Rachapoom Thumpracha",
         student_id: "67159224",
         role: "",       // e.g. "System Analyst & Developer"
-        module: "",     // e.g. "Repair Request & Warranty"
-        services: [],   // e.g. ["Booking Service", "Warranty"]
+        module: "User Service & Payment Service",
+        services: ["User Service", "Payment Service"],
         github: "rachapoomthu-max",
         photo: "",
         lead: false

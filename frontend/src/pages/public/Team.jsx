@@ -6,7 +6,7 @@ import "./team.css";
 /** "Somchai Jaidee" -> "SJ"; Thai names give their first two letters. */
 function initials(name) {
     // Thai titles are not part of the name.
-    const parts = name.trim().replace(/^(นาย|นางสาว|นาง)\s*/, "").split(/\s+/).filter(Boolean);
+    const parts = name.trim().replace(/^(นาย|นางสาว|นาง|อาจารย์|ดร\.)\s*/, "").split(/\s+/).filter(Boolean);
     if (parts.length === 0) return "?";
     if (/^[A-Za-z]/.test(parts[0])) return parts.slice(0, 2).map((p) => p[0].toUpperCase()).join("");
     return [...parts[0].replace(/[ัิ-ฺ็-๎]/g, "")].slice(0, 2).join("");
@@ -45,10 +45,11 @@ export default function Team() {
             />
 
             <section className="team-instructor" aria-label={L("อาจารย์ผู้สอน", "Course instructor")}>
-                <Avatar name={INSTRUCTOR.name || "?"} photo={INSTRUCTOR.photo} size={80} />
+                <Avatar name={INSTRUCTOR.name_en || INSTRUCTOR.name || "?"} photo={INSTRUCTOR.photo} size={80} />
                 <div className="team-instructor-body">
-                    <span className="badge tone-green">{show(INSTRUCTOR.title)}{course ? ` · ${course}` : ""}</span>
+                    <span className="badge tone-green">{show(L(INSTRUCTOR.title, INSTRUCTOR.title_en || INSTRUCTOR.title))}{course ? ` · ${course}` : ""}</span>
                     <h2>{show(INSTRUCTOR.name)}</h2>
+                    {INSTRUCTOR.name_en && <p className="small">{INSTRUCTOR.name_en}</p>}
                     <p className="small muted">{show(INSTRUCTOR.department)}</p>
                     {COURSE.university && <p className="small"><strong>{COURSE.university}</strong></p>}
                 </div>
