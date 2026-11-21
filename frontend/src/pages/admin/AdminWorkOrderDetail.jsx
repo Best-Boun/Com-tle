@@ -5,7 +5,7 @@ import { api } from "../../api/index.js";
 import { useAsync } from "../../utils/useAsync.js";
 import { ErrorNotice, Loading, Modal, Money, Stamp, TextField, useAction } from "../../components/ui.jsx";
 import { WarrantyNotice } from "../../components/Warranty.jsx";
-import { OptionPicker, PaymentSummary, PickupNote, QuotationCard, RepairProgress, WoHistory, deviceLabel } from "../../components/repair.jsx";
+import { OptionPicker, PaymentSummary, PickupNote, QuotationCard, RepairProgress, WoHistory, deviceFacts, deviceLabel } from "../../components/repair.jsx";
 import RefundRequests, { OPEN_REFUND } from "../../components/RefundRequests.jsx";
 import "./admin.css";
 
@@ -14,7 +14,7 @@ const PAYMENT_POLL_MS = 8000;
 
 export default function AdminWorkOrderDetail() {
     const { workOrderId } = useParams();
-    const { L, t, fmt } = useI18n();
+    const { L, t, fmt, lang } = useI18n();
     const wo = useAsync(() => api.repairs.get(workOrderId), [workOrderId]);
     const techs = useAsync(() => api.auth.listTechnicians(), []);
     const parts = useAsync(() => api.inventory.listParts(), []);
@@ -83,7 +83,7 @@ export default function AdminWorkOrderDetail() {
                 <div>
                     <p className="faint small">{t(`source.${w.source}`)}{w.booking_number ? ` · ${w.booking_number}` : ""} · {L("เปิดเมื่อ", "opened")} {fmt.dateTime(w.created_at)}</p>
                     <h1 className="num">{w.work_order_number}</h1>
-                    <p>{w.customer_name} · {deviceLabel(w)}</p>
+                    <p>{w.customer_name} · {deviceLabel(w, lang)}</p>
                 </div>
                 <Stamp kind="wo" status={w.handed_over_at ? "HANDED_OVER" : w.status} />
             </div>
@@ -251,7 +251,7 @@ export default function AdminWorkOrderDetail() {
                         <dl className="facts">
                             <dt>{L("โทร", "Phone")}</dt><dd>{w.customer_phone || "—"}</dd>
                             <dt>{L("บริการ", "Service")}</dt><dd>{w.service_name || "—"}</dd>
-                            <dt>{L("เครื่อง", "Device")}</dt><dd>{[w.device_type, w.brand, w.model].filter(Boolean).join(" · ")}</dd>
+                            <dt>{L("เครื่อง", "Device")}</dt><dd>{deviceFacts(w, lang)}</dd>
                             {w.serial_number && (<><dt>Serial</dt><dd>{w.serial_number}</dd></>)}
                             <dt>{L("อาการ", "Symptom")}</dt><dd>{w.reported_symptom}</dd>
                             {w.accessories && (<><dt>{L("ของที่ฝาก", "Accessories")}</dt><dd>{w.accessories}</dd></>)}

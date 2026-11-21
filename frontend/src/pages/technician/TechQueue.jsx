@@ -12,7 +12,7 @@ import "../admin/admin.css";
  * first gets it.
  */
 export default function TechQueue() {
-    const { L, t, fmt } = useI18n();
+    const { L, t, fmt, lang } = useI18n();
     const navigate = useNavigate();
     const queue = useAsync(() => api.repairs.queue(), []);
     const [run, busy] = useAction();
@@ -66,7 +66,7 @@ export default function TechQueue() {
                                         <div className="faint small">{w.work_order_number} · {t(`source.${w.source}`)}</div>
                                         {waitingHours(w) >= 24 && <div className="small" style={{ color: "var(--red)" }}>{L(`รอมา ${Math.floor(waitingHours(w) / 24)} วัน`, `Waiting ${Math.floor(waitingHours(w) / 24)} d`)}</div>}
                                     </td>
-                                    <td>{deviceLabel(w)}<div className="faint small">{w.service_name}</div></td>
+                                    <td>{deviceLabel(w, lang)}<div className="faint small">{w.service_name}</div></td>
                                     <td className="small">{w.reported_symptom}</td>
                                     <td className="right">
                                         <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => take(w)}>{L("รับงานนี้", "Take this job")}</button>

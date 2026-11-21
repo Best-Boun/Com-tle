@@ -7,7 +7,7 @@ import { deviceLabel } from "../../components/repair.jsx";
 import "./admin.css";
 
 export default function AdminWorkOrders() {
-    const { L, t, fmt } = useI18n();
+    const { L, t, fmt, lang } = useI18n();
     const navigate = useNavigate();
     const [params, setParams] = useSearchParams();
     const status = params.get("status") ?? "OPEN";
@@ -62,7 +62,7 @@ export default function AdminWorkOrders() {
                                         <div className="faint small">{t(`source.${w.source}`)} · {fmt.date(w.created_at)}</div>
                                     </td>
                                     <td>{w.customer_name}<div className="faint small">{w.customer_phone}</div></td>
-                                    <td>{deviceLabel(w)}<div className="faint small">{w.reported_symptom}</div></td>
+                                    <td>{deviceLabel(w, lang)}<div className="faint small">{w.reported_symptom}</div></td>
                                     <td>{w.technician_name || technicianNames.get(w.technician_id) || <span className="badge tone-amber">{L("ยังไม่มอบหมาย", "Unassigned")}</span>}</td>
                                     <td>
                                         <StatusBadge kind="wo" status={w.handed_over_at ? "HANDED_OVER" : w.status} />

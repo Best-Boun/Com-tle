@@ -23,7 +23,28 @@ const THAI = {
     "Only a requested refund can be approved": "อนุมัติได้เฉพาะคำขอที่รออนุมัติ",
     "Only an approved refund can be executed": "ดำเนินการได้เฉพาะคำขอที่อนุมัติแล้ว",
     "Not authorized for this payment operation": "คุณไม่มีสิทธิ์ทำรายการนี้",
-    "Authentication required": "กรุณาเข้าสู่ระบบ"
+    "Authentication required": "กรุณาเข้าสู่ระบบ",
+    "Payment authorization unavailable": "ระบบตรวจสิทธิ์การเงินไม่พร้อม กรุณาลองใหม่",
+    "A valid Idempotency-Key header is required": "คำขอไม่สมบูรณ์ กรุณาลองใหม่",
+    "Idempotency-Key was already used for a different request": "คำขอซ้ำกับรายการก่อนหน้า กรุณาโหลดหน้าใหม่แล้วลองอีกครั้ง",
+    "A request with this Idempotency-Key is still in progress": "รายการนี้กำลังดำเนินการอยู่ รอสักครู่",
+    "A newer or equal bill version is already registered": "มีบิลฉบับใหม่กว่าอยู่แล้ว กรุณาโหลดหน้าใหม่",
+    "Bill customer does not match the work order": "ลูกค้าในบิลไม่ตรงกับใบงาน",
+    "Work order not found": "ไม่พบใบงาน",
+    "Payment not found": "ไม่พบรายการชำระเงิน",
+    "Only a succeeded payment can be voided": "ยกเลิกได้เฉพาะรายการที่ชำระสำเร็จ",
+    "Payment has refunds; it cannot be voided": "รายการนี้มีการคืนเงินแล้ว ยกเลิกไม่ได้",
+    "Customer ownership verification unavailable": "ตรวจสอบเจ้าของใบงานไม่ได้ กรุณาลองใหม่",
+    "Only a succeeded payment can be refunded": "คืนเงินได้เฉพาะรายการที่ชำระสำเร็จ",
+    "Refund not found": "ไม่พบคำขอคืนเงิน",
+    "Only a requested or approved refund can be rejected": "ปฏิเสธได้เฉพาะคำขอที่รออนุมัติหรืออนุมัติแล้ว",
+    "Stored payment amount is invalid": "ข้อมูลยอดเงินไม่ถูกต้อง กรุณาติดต่อผู้ดูแล",
+    "Payment recording is not authorized": "คุณไม่มีสิทธิ์บันทึกการชำระเงิน",
+    "Refund operation is not authorized": "คุณไม่มีสิทธิ์ทำรายการคืนเงิน",
+    "A lock reason is required": "กรุณาระบุเหตุผลการล็อก",
+    "An unlock reason is required": "กรุณาระบุเหตุผลการปลดล็อก",
+    "Work order is already locked": "ใบงานนี้ถูกล็อกอยู่แล้ว",
+    "Work order is not locked": "ใบงานนี้ไม่ได้ถูกล็อก"
 };
 
 function fail(th, en, status = 400) {

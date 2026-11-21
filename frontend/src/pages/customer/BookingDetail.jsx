@@ -5,10 +5,11 @@ import { api } from "../../api/index.js";
 import { useAsync } from "../../utils/useAsync.js";
 import { ErrorNotice, Loading, Modal, Money, Stamp, TextField, useAction } from "../../components/ui.jsx";
 import { deviceLine, symptomLabel } from "../../utils/requestLabels.js";
+import { noteText } from "../../utils/serverText.js";
 
 export default function BookingDetail() {
     const { bookingId } = useParams();
-    const { L, t, fmt } = useI18n();
+    const { L, t, fmt, lang } = useI18n();
     const booking = useAsync(() => api.bookings.get(bookingId), [bookingId]);
     const [cancelOpen, setCancelOpen] = useState(false);
     const [reason, setReason] = useState("");
@@ -70,7 +71,7 @@ export default function BookingDetail() {
                     {b.status_history.map((h) => (
                         <li key={h.history_id}>
                             <strong>{t(`status.booking.${h.new_status}`)}</strong>
-                            <div className="faint small">{fmt.dateTime(h.created_at)} · {h.changed_by_name || L("ระบบ", "System")}{h.reason ? ` · ${h.reason}` : ""}</div>
+                            <div className="faint small">{fmt.dateTime(h.created_at)} · {h.changed_by_name || L("ระบบ", "System")}{h.reason ? ` · ${noteText(h.reason, lang)}` : ""}</div>
                         </li>
                     ))}
                 </ol>

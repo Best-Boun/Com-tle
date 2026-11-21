@@ -5,12 +5,12 @@ import { api } from "../../api/index.js";
 import { useAsync } from "../../utils/useAsync.js";
 import { ErrorNotice, Loading, Stamp, TextField, useAction } from "../../components/ui.jsx";
 import { WarrantyNotice } from "../../components/Warranty.jsx";
-import { QuotationCard, WoHistory, deviceLabel } from "../../components/repair.jsx";
+import { QuotationCard, WoHistory, deviceFacts, deviceLabel } from "../../components/repair.jsx";
 import OptionsEditor, { blankOption, optionsPayload, optionsValid } from "../../components/OptionsEditor.jsx";
 
 export default function TechJobDetail() {
     const { workOrderId } = useParams();
-    const { L, t, fmt } = useI18n();
+    const { L, t, fmt, lang } = useI18n();
     const wo = useAsync(() => api.repairs.get(workOrderId), [workOrderId]);
     const parts = useAsync(() => api.inventory.listParts(), []);
     const [run, busy] = useAction();
@@ -82,7 +82,7 @@ export default function TechJobDetail() {
                 <div>
                     <p className="faint small">{t(`source.${w.source}`)}{w.booking_number ? ` · ${w.booking_number}` : ""}</p>
                     <h1 className="num">{w.work_order_number}</h1>
-                    <p>{deviceLabel(w)} · {w.service_name}</p>
+                    <p>{deviceLabel(w, lang)} · {w.service_name}</p>
                 </div>
                 <Stamp kind="wo" status={w.status} />
             </div>
@@ -196,7 +196,7 @@ export default function TechJobDetail() {
                     <section className="panel">
                         <dl className="facts">
                             <dt>{L("ลูกค้า", "Customer")}</dt><dd>{w.customer_name}</dd>
-                            <dt>{L("เครื่อง", "Device")}</dt><dd>{[w.device_type, w.brand, w.model].filter(Boolean).join(" · ")}</dd>
+                            <dt>{L("เครื่อง", "Device")}</dt><dd>{deviceFacts(w, lang)}</dd>
                             {w.serial_number && (<><dt>Serial</dt><dd>{w.serial_number}</dd></>)}
                             <dt>{L("อาการ", "Symptom")}</dt><dd>{w.reported_symptom}</dd>
                             {w.accessories && (<><dt>{L("ของที่ฝาก", "Accessories")}</dt><dd>{w.accessories}</dd></>)}

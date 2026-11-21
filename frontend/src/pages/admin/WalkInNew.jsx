@@ -54,7 +54,7 @@ export default function WalkInNew() {
                         </TextField>
                         <TextField label={L("ยี่ห้อ", "Brand")} value={f.brand} onChange={set("brand")} />
                         <TextField label={L("รุ่น", "Model")} value={f.model} onChange={set("model")} />
-                        <TextField label="Serial number" value={f.serial_number} onChange={set("serial_number")} />
+                        <TextField label={L("หมายเลขเครื่อง (Serial number)", "Serial number")} value={f.serial_number} onChange={set("serial_number")} />
                         <TextField label={L("อุปกรณ์ที่ฝาก", "Accessories")} value={f.accessories} onChange={set("accessories")} placeholder={L("เช่น อะแดปเตอร์", "e.g. charger")} />
                     </div>
                     <TextField as="textarea" label={L("อาการที่ลูกค้าแจ้ง", "Reported problem")} value={f.reported_symptom} onChange={set("reported_symptom")} required />
