@@ -10,7 +10,7 @@
 
 export const COURSE = {
     code: "CSI400",
-    name: "",        // course name
+    name: "Web Services",        // course name
     university: "Sripatum University (SPU)",
     year: "2026"
 };
@@ -60,7 +60,7 @@ export const MEMBERS = [
         module: "User Service & Payment Service",
         services: ["User Service", "Payment Service"],
         github: "rachapoomthu-max",
-        photo: "",
+        photo: "/team/Rachapoom.gif",
         lead: false
     }
 ];
