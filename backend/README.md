@@ -48,11 +48,13 @@ cd backend
 npm run install:all
 ```
 
-3. Generate the local user key pair:
+3. Generate every key the services need (keys are not in git):
 
 ```powershell
 node generate-keys.js
 ```
+
+   This writes the User-Service token key pair and copies its public key to the gateway, booking, catalog, repair and payment services, and writes the Payment-Service internal key pair (its public key goes to `user-service/keys/internal/payment-key-1.pem`).
 
 4. Start services:
 

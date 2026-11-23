@@ -385,6 +385,12 @@ Content-Type: application/json
 
 ## วิธีรัน
 
+ไฟล์ `.env` และ key (`*.pem`) ไม่อยู่ใน git หลัง clone ต้องสร้างเองก่อน:
+
+1. คัดลอก `.env.example` เป็น `.env` ในทุกโฟลเดอร์ของ backend ที่จะรัน และใน `frontend/` แล้วใส่ค่าฐานข้อมูล (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`)
+2. สร้าง key ทุกตัว: `cd backend && node generate-keys.js` (สร้าง key ของ User-Service และ Payment-Service แล้ววางสำเนา public key ให้ทุก service)
+3. ติดตั้งและรัน:
+
 ```bash
 cd backend
 npm run install:all
@@ -396,7 +402,7 @@ npm run dev          # http://localhost:5173
 ```
 
 - `frontend/.env` ตั้ง `VITE_USE_MOCK=false` เพื่อต่อ API จริง (ข้อมูลบน Railway) หรือ `true` เพื่อใช้ข้อมูลตัวอย่างที่เก็บในเบราว์เซอร์โดยไม่ต้องรัน backend ทั้งสองโหมดใช้ข้อมูลคนละชุดกัน
-- ฐานข้อมูลใหม่ หรือเมื่อมีการเปลี่ยนตาราง: รัน `npx knex migrate:latest` ในโฟลเดอร์ของบริการนั้น (booking-service, repair-service, payment-service, user-service, catalog-service)
+- ฐานข้อมูลใหม่: `user_db` สร้างจาก `user-service/baseline/001_user_service_fresh_schema.sql` และ `payment_db` จาก `payment-service/baseline/001_payment_service_fresh_schema.sql` (**อย่า**รัน `knex migrate:latest` ของ user-service กับฐานข้อมูลที่สร้างจาก baseline แล้ว) ส่วน booking-service, catalog-service, repair-service และ migration ที่เพิ่มของ payment-service ใช้ `npx knex migrate:latest` ในโฟลเดอร์ของบริการนั้น
 - ค่าที่ปรับได้ (repair-service): ระยะรับประกัน `WARRANTY_DAYS` (ค่าเริ่มต้น 90 วัน นับจากวันส่งมอบ เฉพาะงานที่ซ่อม ไม่รวมงานที่เลือกไม่ซ่อมหรือยกเลิก) ใบงานแสดง `warranty` และ `warranty_parent` / `warranty_claims`
 - ค่าที่ปรับได้ (booking-service): บริการตั้งต้นของคำขอ `REQUEST_DIAGNOSIS_SERVICE_ID`, คำขอที่เปิดได้ต่อลูกค้า `REQUEST_MAX_OPEN_PER_CUSTOMER`, อายุคำขอก่อนปิดอัตโนมัติ `REQUEST_EXPIRY_DAYS` (ค่าเริ่มต้น 30 วัน booking-service ตรวจทุก `REQUEST_EXPIRY_CHECK_MINUTES` นาที แล้วเปลี่ยนคำขอที่ไม่มีใครนำเครื่องมาเป็น EXPIRED)
 - ตาราง/คอลัมน์ของระบบมัดจำที่ถอดออกแล้ว (`deposits`, `deposit_audit_logs`, `bookings.deposit_due_at`) ยังอยู่ในฐานข้อมูลแต่ไม่มีโค้ดใช้ เพราะ migration รันไปแล้ว ถ้าจะลบให้ทำเป็น migration ใหม่

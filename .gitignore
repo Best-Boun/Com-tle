@@ -1,0 +1,25 @@
+# Secrets: never commit. Copy each .env.example to .env and run
+# `node backend/generate-keys.js` after cloning.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+**/keys/
+
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+
+# Logs, dumps and OS / editor files
+*.log
+npm-debug.log*
+dump-*.sql
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local Claude Code settings (launch configs for this machine)
+.claude/
