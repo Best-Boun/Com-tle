@@ -49,7 +49,7 @@ export const MEMBERS = [
         module: "Repair Service & Inventory Service",
         services: ["Repair Service", "Inventory Service"],
         github: "Best-Boun",
-        photo: "",
+        photo: "/team/stdempimg.gif",
         lead: true
     },
     {
