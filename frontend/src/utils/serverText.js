@@ -67,6 +67,8 @@ const NOTES = [
     [/^Quotation Rev\.(\d+) sent with (\d+) options$/, "ส่งตัวเลือก $2 แบบ Rev.$1", "Sent $2 options (Rev.$1)"],
     [/^ส่งตัวเลือก (\d+) แบบ Rev\.(\d+)$/, "ส่งตัวเลือก $1 แบบ Rev.$2", "Sent $1 options (Rev.$2)"],
     [/^เลือก “(.+)” Rev\.(\d+)$/, "เลือก “$1” Rev.$2", "Chose “$1” (Rev.$2)"],
+    [/^Option (\d+) "(.+)" chosen on Rev\.(\d+)$/, "เลือกตัวเลือก $1 “$2” Rev.$3", "Chose option $1 “$2” (Rev.$3)"],
+    [/^Option (\d+) "(.+)" chosen on Rev\.(\d+): (.+)$/, "เลือกตัวเลือก $1 “$2” Rev.$3: $4", "Chose option $1 “$2” (Rev.$3): $4"],
     [/^Repair completed; testing started$/, "ซ่อมเสร็จ เริ่มทดสอบ", "Repair completed; testing started"],
     [/^(?:Test passed|ทดสอบผ่าน)$/, "ทดสอบผ่าน", "Test passed"],
     [/^(?:Test failed; repair resumed|ทดสอบไม่ผ่าน กลับไปซ่อม)$/, "ทดสอบไม่ผ่าน กลับไปซ่อม", "Test failed; repair resumed"],

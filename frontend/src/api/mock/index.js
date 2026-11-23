@@ -943,7 +943,9 @@ export const repairs = {
                 setWoStatus(wo, "APPROVED", user, chose);
             }
         } else {
-            getDb().workOrderHistory.push({ id: newId(), work_order_id: wo.work_order_id, old_status: wo.status, new_status: wo.status, changed_by: user.user_id, note: chose, created_at: now() });
+            // Like Repair-Service: the status does not change, so the choice is an
+            // event row (old_status null); the real DB rejects old = new.
+            getDb().workOrderHistory.push({ id: newId(), work_order_id: wo.work_order_id, old_status: null, new_status: wo.status, changed_by: user.user_id, note: chose, created_at: now() });
         }
         return respond(presentWo(wo, { detail: true }));
     }),

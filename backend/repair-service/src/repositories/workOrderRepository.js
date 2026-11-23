@@ -920,10 +920,13 @@ function createWorkOrderRepository(db) {
                     await trx("work_orders").where({ work_order_id: workOrder.work_order_id }).update({
                         updated_at: decidedAt
                     });
+                    // The status does not change, and the team schema's
+                    // chk_wo_status_history_changed rejects old_status = new_status,
+                    // so the choice is logged as an event row (old_status NULL).
                     await trx("work_order_status_history").insert({
                         history_id: randomUUID(),
                         work_order_id: workOrder.work_order_id,
-                        old_status: workOrder.status,
+                        old_status: null,
                         new_status: workOrder.status,
                         changed_by_user_id: user.userId,
                         reason,

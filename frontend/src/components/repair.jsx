@@ -217,15 +217,21 @@ export function WoHistory({ history }) {
     const { L, t, fmt, lang } = useI18n();
     return (
         <ol className="timeline">
-            {history.map((h) => (
-                <li key={h.id}>
-                    <strong>{h.old_status === h.new_status ? (noteText(h.note, lang) || "—") : t(`status.wo.${h.new_status}`)}</strong>
-                    <div className="faint small">
-                        {fmt.dateTime(h.created_at)} · {h.changed_by_name || L("ระบบ", "System")}
-                        {h.old_status !== h.new_status && h.note ? ` · ${noteText(h.note, lang)}` : ""}
-                    </div>
-                </li>
-            ))}
+            {history.map((h, index) => {
+                // An event that did not change the status (a choice on extra work,
+                // an assignment): old_status equals new_status, or is null after
+                // the first row. Show its note instead of the status.
+                const isEvent = h.old_status === h.new_status || (index > 0 && !h.old_status && Boolean(h.note));
+                return (
+                    <li key={h.id}>
+                        <strong>{isEvent ? (noteText(h.note, lang) || "—") : t(`status.wo.${h.new_status}`)}</strong>
+                        <div className="faint small">
+                            {fmt.dateTime(h.created_at)} · {h.changed_by_name || L("ระบบ", "System")}
+                            {!isEvent && h.note ? ` · ${noteText(h.note, lang)}` : ""}
+                        </div>
+                    </li>
+                );
+            })}
         </ol>
     );
 }
